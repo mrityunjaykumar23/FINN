@@ -18,7 +18,7 @@ Repository: GitHub publication requires the account connection; use the final re
 
 AI build history: `docs/development/CONVERSATION.md` contains actual user/assistant messages from the development chat. It is an honest partial export, not a fabricated reconstruction. Keep the complete chat export/share link with the submission.
 
-Please ensure the deployed demo's audience allows the intended assessors to visit before sending this note. This file is a draft and has not been emailed.
+The deployed demo is public and opens without sign-in. This file is a draft and has not been emailed.
 
 Regards,
 [Your name]

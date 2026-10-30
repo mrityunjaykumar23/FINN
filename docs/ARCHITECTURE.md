@@ -78,4 +78,4 @@ The initial tracker covers Infosys FY2025 revenue growth and operating margin. J
 
 Admin ingestion is disabled unless `ADMIN_TOKEN` is configured and provided as a bearer token. SQL values are parameterized; ticker/path inputs, settings and request schemas are validated. Documents cannot execute instructions. The app does not fetch arbitrary user-supplied URLs through research. Live and historical observations have separate database keys and are never silently interchanged.
 
-For production beyond this private prototype: enforce request/rate budgets, move large PDF processing to a queue, replace lexical scans with FTS/BM25, schedule approved incremental ingestion, maintain publication-date verification, validate all model claim entailment, and widen filings/guidance coverage before making completeness claims.
+For production beyond this public prototype: enforce request/rate budgets, move large PDF processing to a queue, replace lexical scans with FTS/BM25, schedule approved incremental ingestion, maintain publication-date verification, validate all model claim entailment, and widen filings/guidance coverage before making completeness claims.

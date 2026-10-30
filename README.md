@@ -6,7 +6,7 @@ FINN is a mobile-first working prototype for the ENAM Holdings AI Engineer Build
 
 [Deployed FINN](https://finn-investment-intelligence-mrity.hazyanole2049.chatgpt.site) · [Demo walkthrough](docs/DEMO.md) · [Architecture](docs/ARCHITECTURE.md) · [Verification](docs/VERIFICATION.md)
 
-The Site starts private and requires the owner's sign-in. A judge-facing audience must be explicitly configured before submission. The GitHub account is not connected in this environment; the local repository and source-hosted deployment are prepared, but no GitHub URL is claimed.
+The deployed demo is public and opens without sign-in. The GitHub account is not connected in this environment; the local repository and source-hosted deployment are prepared, but no GitHub URL is claimed.
 
 ![FINN management guidance tracker](docs/screenshots/promise-tracker-desktop.jpg)
 
@@ -160,4 +160,4 @@ docs/                Architecture, demo, screenshots and submission materials
 
 The original brief asks for a mobile prototype, GitHub repository, genuine AI build history and covering note. [The covering note](docs/COVERING_NOTE.md) is drafted; it has **not** been emailed. Actual user-visible development messages and the supplied build prompt are preserved under `docs/development/`. That is a partial real export, not invented development history; keep the complete chat export/share link for submission.
 
-Before submission, publish to the intended GitHub account and configure a demo audience assessors can access. Planned engineering work: scheduled approved source ingestion, broader exchange coverage, queued large-document parsing, FTS/BM25 or semantic retrieval, stricter model entailment validation, automated structured statement extraction, and more verified guidance comparisons.
+Before submission, publish to the intended GitHub account. The demo audience is already public, as requested. Planned engineering work: scheduled approved source ingestion, broader exchange coverage, queued large-document parsing, FTS/BM25 or semantic retrieval, stricter model entailment validation, automated structured statement extraction, and more verified guidance comparisons.
