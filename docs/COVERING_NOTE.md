@@ -14,7 +14,7 @@ Next I would widen approved source coverage, add scheduled ingestion and queued 
 
 Demo: [FINN](https://finn-investment-intelligence-mrity.hazyanole2049.chatgpt.site)
 
-Repository: GitHub publication requires the account connection; use the final repository URL once published.
+Repository: [mrityunjaykumar23/FINN](https://github.com/mrityunjaykumar23/FINN)
 
 AI build history: `docs/development/CONVERSATION.md` contains actual user/assistant messages from the development chat. It is an honest partial export, not a fabricated reconstruction. Keep the complete chat export/share link with the submission.
 

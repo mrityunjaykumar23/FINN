@@ -22,6 +22,6 @@ Verified locally on 30 October 2026. The project uses real primary documents and
 
 Browser QA covers the default briefing, 7-day window, evidence drawer, source-page links, company research, promise tracker, portfolio editing and alert settings at desktop and mobile viewports. Screenshots are in `docs/screenshots/`.
 
-The optional external LLM integration has **not** been exercised with a provider key. All demonstrated research ran without one. Production deployment succeeded, public access was verified in the browser, and the entire nine-test HTTP suite passed against the public URL. GitHub publication requires a connected account and is not asserted here.
+The optional external LLM integration has **not** been exercised with a provider key. All demonstrated research ran without one. Production deployment succeeded, public access was verified in the browser, and the entire nine-test HTTP suite passed against the public URL. The source repository is published publicly at [mrityunjaykumar23/FINN](https://github.com/mrityunjaykumar23/FINN).
 
 COFORGE primary source retrieved during the live test: https://www.bseindia.com/xml-data/corpfiling/AttachHis/4a9f4e43-9ca2-4956-8d5f-053e45e7a0ef.pdf . The interactive source period is labelled “Period not verified” until reviewed. Source availability can change, and this single successful test is not a guarantee for every NSE ticker.
