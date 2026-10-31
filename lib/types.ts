@@ -42,18 +42,39 @@ export type Document = {
   hash: string;
   mode: string;
   pages: { page: number; text: string }[];
+  publisher?: string;
+  extraction_status?: string;
+  indexed_pages?: number;
+  total_pages?: number;
+  period_status?: string;
 };
 export type Research = {
   ticker: string;
   question: string;
   summary: string;
-  key_findings: { text: string; source_ids: string[]; excerpt?: boolean }[];
+  key_findings: ResearchFinding[];
   metrics: Metric[];
   source_references: (Evidence & { id: string })[];
   limitations: string[];
   confidence: string;
   engine: string;
   cached?: boolean;
+  ai_status?: string;
+  model_used?: string;
+  generated_at?: string;
+  confidence_basis?: string;
+  usage?: { input_tokens: number; output_tokens: number };
+  management_commentary?: ResearchFinding[];
+  risks?: ResearchFinding[];
+  positive_factors?: ResearchFinding[];
+};
+export type ResearchFinding = {
+  text: string;
+  source_ids: string[];
+  excerpt?: boolean;
+  evidence_excerpt?: string;
+  uncertainty_note?: string;
+  verification?: string;
 };
 export type GuidanceResult = Guidance & {
   status: string;

@@ -17,7 +17,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { AlertSettings } from "./AlertSettings";
 import { Briefing } from "./Briefing";
-import { api, ErrorBox, Logo, navigation, View } from "./common";
+import { api, ErrorBox, Logo, navigation, View, Skeleton } from "./common";
 import { EventDetail } from "./Evidence";
 import { CompanySearch, Portfolio } from "./Portfolio";
 import { PromiseTracker } from "./PromiseTracker";
@@ -208,7 +208,13 @@ export default function Dashboard() {
             </button>
           </div>
           {error && <ErrorBox message={error} retry={refreshPortfolio} />}
-          {view === "today" && (
+          {loading && (
+            <div role="status">
+              <p className="muted">Loading your saved portfolio…</p>
+              <Skeleton rows={3} />
+            </div>
+          )}
+          {!loading && !error && view === "today" && (
             <Briefing
               companies={companies}
               mode={mode}

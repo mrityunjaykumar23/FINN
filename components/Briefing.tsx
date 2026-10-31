@@ -121,7 +121,7 @@ export function Briefing({
         </div>
         <div className="segmented" aria-label="Briefing window">
           {[
-            ["1", "24 hours"],
+            ["1", "1 calendar day"],
             ["7", "7 days"],
             ["custom", "Custom"],
           ].map(([value, label]) => (

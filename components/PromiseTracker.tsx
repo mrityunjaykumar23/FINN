@@ -27,6 +27,7 @@ export function PromiseTracker({
   onResearch: (t: string, q?: string) => void;
 }) {
   const [comparisons, setComparisons] = useState<GuidanceResult[]>([]),
+    [companyFilter, setCompanyFilter] = useState(""),
     [loading, setLoading] = useState(true),
     [error, setError] = useState("");
   useEffect(() => {
@@ -78,24 +79,41 @@ export function PromiseTracker({
           Guidance vs. delivery{" "}
           <span className="count-pill">{comparisons.length}</span>
         </h2>
-        <span className="muted">Verified historical comparisons · FY2025</span>
+        <span className="muted">Stored primary-source comparisons</span>
       </div>
+      <label className="muted">
+        Company{" "}
+        <select
+          aria-label="Filter guidance by company"
+          value={companyFilter}
+          onChange={(e) => setCompanyFilter(e.target.value)}
+        >
+          <option value="">All companies</option>
+          {[...new Set(comparisons.map((g) => g.ticker))].map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </select>
+      </label>
       {loading ? (
         <Skeleton rows={2} />
       ) : (
-        comparisons.map((g, i) => (
-          <GuidanceCard
-            key={`${g.ticker}-${g.metric}`}
-            g={g}
-            index={i}
-            onResearch={() =>
-              onResearch(
-                g.ticker,
-                "What did management say about FY2025 growth and future margins?",
-              )
-            }
-          />
-        ))
+        comparisons
+          .filter((g) => !companyFilter || g.ticker === companyFilter)
+          .map((g, i) => (
+            <GuidanceCard
+              key={g.id ?? `${g.ticker}-${g.metric}-${i}`}
+              g={g}
+              index={i}
+              onResearch={() =>
+                onResearch(
+                  g.ticker,
+                  `What did management guide for ${g.period} and what was reported?`,
+                )
+              }
+            />
+          ))
       )}
       <div className="tracker-next">
         <div>
@@ -157,23 +175,34 @@ export function GuidanceCard({
           <div className="mini-eyebrow">01 / THE GUIDANCE</div>
           <strong>
             {g.low}–{g.high}
-            <small>%</small>
+            <small>
+              {/^(%|percent|percentage)$/i.test(g.unit ?? "%")
+                ? "%"
+                : ` ${g.unit}`}
+            </small>
           </strong>
-          <p>Management’s stated range</p>
-          <span>January 2025 · Q3 earnings call</span>
+          <p>
+            {g.guidance_type ?? "range"}
+            {g.revised ? " · revised guidance" : ""}
+          </p>
+          <span>{g.sources[0]?.period} · Primary statement</span>
         </div>
         <div className="guidance-statement actual">
           <div className="mini-eyebrow">02 / THE REPORTED RESULT</div>
           <strong>
-            {g.actual}
-            <small>%</small>
+            {g.actual ?? "Unavailable"}
+            <small>
+              {g.actual == null
+                ? ""
+                : /^(%|percent|percentage)$/i.test(g.unit ?? "%")
+                  ? "%"
+                  : ` ${g.unit}`}
+            </small>
           </strong>
           <p>
-            {g.metric === "Revenue growth"
-              ? "Full-year constant-currency growth"
-              : "Full-year operating margin"}
+            {g.metric} · {g.period}
           </p>
-          <span>April 2025 · Official results</span>
+          <span>{g.actual_period || "Actual result not yet available"}</span>
         </div>
         <div className="guidance-verdict">
           <div className="mini-eyebrow">THE DIFFERENCE</div>
@@ -189,7 +218,13 @@ export function GuidanceCard({
             ) : (
               `${g.variance > 0 ? "+" : "−"}${Math.abs(g.variance).toFixed(1)}`
             )}
-            <small>{g.variance !== null && g.variance !== 0 ? "pp" : ""}</small>
+            <small>
+              {g.variance !== null && g.variance !== 0
+                ? g.unit === "%" || !g.unit
+                  ? "pp"
+                  : g.unit
+                : ""}
+            </small>
           </strong>
           <p>{g.explanation}</p>
         </div>

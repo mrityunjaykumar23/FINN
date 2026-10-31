@@ -1,163 +1,110 @@
 # FINN — Investment Intelligence
 
-**An investor should know what changed, why it matters, and where the evidence is—in 30 seconds.**
+FINN turns primary company disclosures and stored end-of-day observations into a portfolio briefing, evidence-grounded company research, and management guidance comparisons. No login or signup.
 
-FINN is a mobile-first working prototype for the ENAM Holdings AI Engineer Build Challenge. It replaces an undifferentiated feed with a considered loop: **discover → understand → inspect → investigate**.
-
-[Deployed FINN](https://finn-investment-intelligence-mrity.hazyanole2049.chatgpt.site) · [GitHub repository](https://github.com/mrityunjaykumar23/FINN) · [Demo walkthrough](docs/DEMO.md) · [Architecture](docs/ARCHITECTURE.md) · [Verification](docs/VERIFICATION.md)
-
-The deployed demo and the GitHub repository are public. The demo opens without sign-in; clone the repository from [mrityunjaykumar23/FINN](https://github.com/mrityunjaykumar23/FINN).
-
-![FINN management guidance tracker](docs/screenshots/promise-tracker-desktop.jpg)
-
-## What works
-
-- An 18-company, diverse Indian watchlist; add/remove companies and persist choices in SQLite.
-- A default 24-hour/date-only briefing, 7-day and custom windows, company/category filters, transparent attention scores, and collapsed lower-priority updates.
-- Real EOD price/volume triggers with configurable thresholds, prior-session lookbacks, and company overrides.
-- Evidence drawers with original PDF links, supporting passages, source-linked quarterly Revenue/EBITDA/PBT/PAT, and deterministic QoQ/YoY calculations.
-- Ticker-based research independent of portfolio membership. Cached examples include Asian Paints, Persistent Systems and Avenue Supermarts. An uncached COFORGE.NS request was tested through validation, discovery, extraction, indexing and cited retrieval.
-- A visible management promise tracker: Infosys's January revised FY2025 revenue and operating-margin guidance versus subsequent official results.
-- Credential-free research: original passages plus validated calculations. Optional server-side citation-constrained language-model synthesis.
-- Honest loading, missing-evidence, unsupported-ticker, source-failure, incomplete-statement and empty-window states.
-
-## Honest demo boundaries
-
-The default is a **verified historical replay**, not a live trading terminal. It contains 576 authentic Yahoo daily observations from March–April 2025 and 11 retrieved primary documents across five companies. The curated briefing has four results/call updates for **two** portfolio companies. The UI explicitly shows this coverage gap; absence of a surfaced filing does not establish absence of an exchange disclosure.
-
-The research library is historical. Large annual reports index a selected set of relevant pages. In live discovery, PDFs are limited to 8 MB and 500 pages; access restrictions, scans and oversized files return explicit limitations. There is no continuously scheduled exchange scraper, phone push service, investment recommendation engine or trading workflow. Ambiguous LLM classification, broad financial extraction and multi-company guidance extraction are deliberately deferred.
-
-## Stack and architecture
-
-React + TypeScript, Next.js App Router conventions through Vinext/Vite, Tailwind CSS, Lucide and Recharts. Same-origin REST handlers use Zod validation; Drizzle migrations manage SQLite on Cloudflare D1. Python uses httpx and pypdf for ingestion and independently validates the financial calculations.
-
-The available host supports a single Worker and D1. This adapts the suggested FastAPI/SQLAlchemy split so the deployed app has a functioning persistent backend without an unprovisioned second service. The original challenge has no stack restriction. See [the decision and trade-offs](docs/ARCHITECTURE.md).
-
-```mermaid
-flowchart LR
-  Sources[Official PDFs + Yahoo EOD] --> Ingest[Python / live adapters]
-  Ingest --> DB[(SQLite / D1)]
-  DB --> Signals[Classify · rank · evaluate alerts]
-  DB --> Retrieval[Ticker / period restricted retrieval]
-  Retrieval --> Analysis[Deterministic calculations / optional LLM]
-  Signals --> API[REST endpoints]
-  Analysis --> API
-  API --> Mobile[Mobile investment desk]
-```
+This upgrade is on **`upgrade/sqlite-gemini-push-pull`**, for localhost review. It has not been pushed to GitHub or deployed. The [public repository](https://github.com/mrityunjaykumar23/FINN) and [public demo](https://finn-investment-intelligence-mrity.hazyanole2049.chatgpt.site) still describe the earlier published version.
 
 ## Run locally
 
-Use Node.js 24 (22.13+ supported), npm, and optionally Python 3.11+ for rebuilding data. No API keys are required.
+Node 24, npm, and optional Python 3.11+:
 
 ```sh
 npm ci
-npm run build
 npm run db:migrate:local
-npm run dev -- --port 5173
+npm run dev -- --host 127.0.0.1
 ```
 
-Open [FINN locally](http://127.0.0.1:5173). The first API request imports the verified snapshot into the local database. Data persists in ignored `.wrangler/state/`. Local and deployed databases are separate. On Windows, use `npm.cmd` when PowerShell execution policy blocks `npm.ps1`.
+For a local production preview after `npm run build`, use `npm start` (default port 8787); the launcher explicitly loads the root `.dev.vars` as hidden server bindings. Stop that preview before rebuilding on Windows.
 
-To preview the production build, use `npm start`. To generate a new schema migration after changing `db/schema.ts`, use `npm run db:generate`; never modify an already applied migration.
+Open [localhost:5173](http://127.0.0.1:5173). Migrations preserve the historical snapshot and existing portfolios/settings. SQLite lives in ignored `.wrangler/state/`. The first request seeds a fresh database; a visitor receives 18 starter companies exactly once. An empty watchlist stays empty.
 
-## Environment
+For an older checkout with tables but no Wrangler migration ledger, first run `npm run db:backup`, then `node scripts/adopt-local-baseline.mjs`, then migrate. Adoption verifies the original schema before registering it; it never resets financial data. See [database backup and recovery](docs/DATABASE_DESIGN.md).
 
-Copy `.env.example` to `.dev.vars` for local optional integrations. Configure hosted values as runtime secrets/variables, never in browser bundles or the hosting manifest.
+## Gemini configuration
 
-| Variable        | Meaning                                                             |
-| --------------- | ------------------------------------------------------------------- |
-| `LLM_API_KEY`   | Optional provider key; empty uses deterministic/extractive research |
-| `LLM_BASE_URL`  | HTTPS provider API base supporting `/chat/completions` JSON         |
-| `LLM_MODEL`     | Provider model identifier; no hardcoded paid default                |
-| `ADMIN_TOKEN`   | Bearer secret enabling ingestion endpoints; empty disables them     |
-| `FINN_TEST_URL` | Integration-test origin; defaults to `http://127.0.0.1:5173`        |
+Copy `.env.example` to ignored `.dev.vars`, enter values locally, then restart the server. Never paste keys into chat or put them in frontend variables.
 
-The optional LLM provider path has no credentials in this submission and has not been externally tested with a key. The demonstrated core does not depend on it.
+| Variable | Purpose |
+| --- | --- |
+| `GEMINI_API_KEY` | Server-only Google API key |
+| `AI_ENABLED` | `true` enables configured Gemini; `false` forces extractive/offline mode |
+| `GEMINI_MODEL_FAST` | Configurable extraction, classification and research model |
+| `GEMINI_MODEL_REASONING` | Reserved for optional stronger reasoning; this implementation uses the fast model for all tasks |
+| `ADMIN_TOKEN` | Long random server secret for imports and batch jobs |
+| `FINN_TEST_URL` | Local integration-test origin, default `http://127.0.0.1:5173` |
 
-## Rebuild the verified data
+Native `@google/genai` 2.32.0 is used. Real credentialed tests and complete localhost research succeeded with **gemini-3.5-flash-lite**. The model is configurable; availability and quotas depend on the key/project. Official [models](https://ai.google.dev/gemini-api/docs/models), [pricing](https://ai.google.dev/gemini-api/docs/pricing), [structured output](https://ai.google.dev/gemini-api/docs/structured-output), and [SDK](https://googleapis.github.io/js-genai/) were checked during implementation.
 
-The bundled snapshot is enough to run offline. Rebuilding requires public-source access; sites may restrict automated requests, and no bypass is attempted.
+Missing credentials, provider failures, unsupported responses and budget limits produce explicitly labelled source retrieval and deterministic calculations. They never pretend to be Gemini output.
+
+## PUSH: filings and alerts
+
+The historical replay remains separately labelled, with authentic April 2025 prices and primary disclosures. Current observations never replace replay data. Filing dates without reliable times use inclusive calendar-day filtering; the UI labels this accurately.
+
+A protected import accepts an authentic primary PDF URL or an already indexed document. It validates company association, downloads permitted HTTPS sources, follows bounded primary-host redirects, extracts actual PDF pages, deduplicates content, classifies, explains ranking, extracts supported facts and stores a briefing event. All 17 categories remain supported. A source ledger distinguishes successful checks, partial discovery and failure from an empty result.
+
+Use the local job runner; it reads `ADMIN_TOKEN` from `.dev.vars` in memory:
 
 ```sh
-python -m pip install --target .python-libs -r requirements.txt
-python scripts/ingest.py
-python scripts/build-seed.py
-python scripts/validate-financials.py
+npm run job:local -- filing docs/examples/dmart-q3.json
+npm run job:local -- filing docs/examples/hcl-fy24.json
+npm run job:local -- filing docs/examples/hcl-q3fy25.json
+npm run job:local -- extract docs/examples/dmart-extract.json
+npm run job:local -- sync
+npm run job:local -- evaluate
+npm run job:local -- replay
 ```
 
-Use `py` instead of `python` on Windows if appropriate. `--documents-only`, `--market-only`, `--ticker SYMBOL` and `--live` narrow the ingestion job. Downloaded PDFs stay in ignored `data/sources/`; extracted source metadata is retained in `data/source-manifest.json`. The seed keeps SHA-256s of original PDFs and their actual page numbers. Every curated numeric extraction is checked against its cited page before building the snapshot.
+`sync` refreshes completed EOD observations for monitored tickers and evaluates all stored owners. Optional JSON `tickers` narrows the bounded job. `evaluate` checks current completed EOD sessions and material filings for stored owners; `replay` evaluates historical observations. These are callable background jobs independent of a browser. No cloud schedule, browser push or phone delivery has been activated.
+
+Notifications persist read/unread/dismiss state per visitor. Re-evaluation cannot duplicate an event or erase its lifecycle. Settings affect newly evaluated signals; history remains accessible.
+
+## PULL: company research
+
+Search a valid NSE ticker independently of portfolio membership. Unknown symbols are validated against Yahoo daily data. Primary PDF links are discovered through a public directory; its financial tables and opinions are never evidence. Explicit safe source imports remain available when discovery is restricted.
+
+The pipeline uses SQLite FTS5 plus ticker/period/type-filtered lexical retrieval, page references, deterministic financial calculations, bounded Gemini synthesis, strict Zod validation and evidence checks. Every material model claim carries real source IDs and a literal supporting excerpt. Wrong-company sources, fabricated quotes, unsupported numbers and incompatible periods are rejected. Automated checks establish source linkage, not complete semantic proof; limitations stay visible.
+
+Research exposes model/execution status, citations, financial metrics, commentary, positive factors, risks and evidence coverage. Available fiscal periods drive the tables. QoQ/YoY comparisons match unit and accounting basis. Derived quarterly comparisons retain both input metric references in SQLite. Missing EBITDA and incompatible definitions remain unavailable.
+
+Management guidance is stored in SQLite, including targets/ranges, periods, units, basis, original quotes and revisions. Reported actuals are matched conservatively. The original Infosys examples remain; dynamic HCLTech initial/revised FY2025 guidance and its actual were also tested.
 
 ## API
 
-| Method    | Route                                              | Purpose                                               |
-| --------- | -------------------------------------------------- | ----------------------------------------------------- |
-| GET       | `/api/health`                                      | Runtime/database health and operating mode            |
-| GET, POST | `/api/portfolio`                                   | Read portfolio / validate and add company             |
-| DELETE    | `/api/portfolio/{ticker}`                          | Remove a company                                      |
-| GET       | `/api/market/{ticker}`                             | Stored daily series; `mode=historical` or `live`      |
-| POST      | `/api/market/refresh`                              | Retrieve completed recent sessions for a ticker       |
-| GET       | `/api/digest`                                      | Windowed ranked filings and calculated EOD alerts     |
-| GET       | `/api/announcements`, `/api/announcements/{id}`    | Filings and detailed evidence                         |
-| GET, PUT  | `/api/alerts/settings`                             | Persistent global/category/company rules              |
-| GET       | `/api/alerts`                                      | Stored in-app triggers                                |
-| GET       | `/api/companies/search?q=...`                      | Cached search plus arbitrary ticker resolution        |
-| GET       | `/api/companies/{ticker}/overview`                 | Documents, metrics, market series and guidance        |
-| POST      | `/api/research`                                    | Grounded question with optional period/type filters   |
-| GET       | `/api/research/{ticker}/documents`                 | Company source catalogue                              |
-| GET       | `/api/research/{ticker}/guidance`, `/api/guidance` | Comparable guidance pairs                             |
-| POST      | `/api/admin/ingest-market`                         | Protected market ingestion                            |
-| POST      | `/api/admin/ingest-document`                       | Protected primary exchange PDF import                 |
-| POST      | `/api/admin/ingest-announcements`                  | Protected filing import referencing an indexed source |
+| Method | Route | Purpose |
+| --- | --- | --- |
+| GET | `/api/health`, `/api/status` | Health, source coverage, provider configuration and bounded operational statistics |
+| GET, POST | `/api/portfolio` | Owner-isolated watchlist |
+| DELETE | `/api/portfolio/{ticker}` | Remove only this visitor's association |
+| GET | `/api/market/{ticker}` | Stored series, `mode=historical` or `live` |
+| POST | `/api/market/refresh` | Retrieve completed current sessions |
+| GET | `/api/digest`, `/api/announcements` | Queryable filing windows and signals |
+| GET | `/api/announcements/{id}`, `/api/documents/{id}` | Primary evidence and financial tables |
+| GET, PUT | `/api/alerts/settings` | Persistent thresholds/category/company rules |
+| GET | `/api/alerts?status=unread` | Owner-isolated history |
+| PATCH | `/api/alerts/{id}` | `status`: unread, read or dismissed |
+| POST | `/api/alerts/evaluate` | Evaluate this visitor's stored data |
+| GET | `/api/companies/search?q=...`, `/api/companies/{ticker}/overview` | Ticker resolution and source/metric overview |
+| POST | `/api/research` | Ticker/question with optional period/type |
+| POST | `/api/companies/refresh-documents` | Bounded source discovery with cooldown |
+| GET | `/api/guidance`, `/api/research/{ticker}/guidance` | Database-backed comparisons |
+| POST | `/api/admin/ingest-document`, `/api/admin/ingest-announcements` | Protected primary-source import |
+| POST | `/api/admin/extract-document`, `/api/admin/ingest-market`, `/api/admin/evaluate-alerts` | Protected extraction and background jobs |
 
-Errors are structured as `{ "error": { "code": "...", "message": "..." } }`. Ingestion endpoints require `Authorization: Bearer <ADMIN_TOKEN>` and are disabled without a configured token. Never put that token into the frontend.
+Mutations validate input and same-origin requests. Responses use structured errors. Admin credentials never enter React. Random HttpOnly cookies establish anonymous ownership; untrusted identity headers have no authority. Session/global provider budgets, shared SQL concurrency locks, request-size limits, PDF limits, finite retries and cached identical analyses bound public API costs.
 
-## AI, retrieval and costs
-
-FINN normalizes a ticker, looks up source documents, attempts discovery on a cache miss, extracts bounded PDF pages, chunks with overlap, retrieves company-scoped passages, computes supported financial comparisons, and optionally synthesizes an answer. Citation IDs and original locations accompany findings. Documents are untrusted data and have no execution path or access to secrets.
-
-The default path makes **zero model calls**. It performs deterministic comparisons and displays retrieved quotations rather than pretending model memory is a source. With a provider configured, numeric comparisons still use code, while qualitative requests can use the configured model. Source and answer caching use document hashes, ticker, filters, question, pipeline version and model; changed documents invalidate stale analysis. Lexical retrieval keeps the small corpus inspectable and cheap. It is not a semantic vector search system.
-
-## Calculation methodology
-
-- Daily change uses consistent provider-adjusted closes, avoiding split-driven false moves.
-- Relative volume = current session volume / average volume of the **previous N** sessions. The current session is excluded; an incomplete baseline is unavailable.
-- QoQ and YoY = `(current − comparison) / comparison × 100`. Zero/negative bases are explicitly unavailable rather than misleading ratios.
-- Financial figures preserve currency, units, consolidation basis, period and source page. Missing EBITDA is not inferred from operating profit.
-- Guidance compares the same period and definition. A range miss is measured in percentage points from the nearest boundary. It is not a share-price forecast or a statement about intent.
-- Live refresh excludes the current Indian calendar day to avoid reporting an unfinished session as an EOD close.
-
-## Tests and validation
+## Verify
 
 ```sh
 npm test
 npm run typecheck
-# With the local server running:
+npm run build
 npm run test:api
-python scripts/validate-financials.py
+npm run test:gemini
+npm run test:ingestion
+py scripts/validate-financials.py
 ```
 
-The suite covers numeric edge cases, prior-session volume, source provenance, period/basis alignment, classification, score bounds, duplicate constraints, owner isolation, date filtering, persistence, protected ingestion, cross-company retrieval, absent evidence, and guidance calculations. The API suite uses its own device session and restores modified settings/portfolio entries.
+The real Gemini test is opt-in through local server credentials and explicitly skipped without them. HTTP upgrade mutation tests accept localhost only. Test fixtures are isolated from the browser watchlist. See [actual verification evidence](docs/VERIFICATION.md), [architecture](docs/ARCHITECTURE.md), [AI pipeline](docs/AI_PIPELINE.md), [limitations](docs/KNOWN_LIMITATIONS.md), and [local demo](docs/DEMO.md).
 
-Browser verification uses 1440×1000 desktop and 390×844 mobile viewports. See [the actual verification record](docs/VERIFICATION.md). An end-to-end uncached-ticker test succeeded for COFORGE.NS, but does not imply every upstream document will be accessible.
-
-## Source layout
-
-```text
-app/                 App shell, styles and same-origin REST routes
-components/          Briefing, evidence, portfolio, research, tracker and rules
-lib/domain.ts        Pure financial, ranking and retrieval functions
-lib/research-analysis.ts  Deterministic source-linked financial findings
-lib/server.ts        Persistent storage, adapters, retrieval and provider boundary
-db/schema.ts         Normalized Drizzle schema
-drizzle/             Versioned SQLite migrations
-data/                Authentic source metadata, snapshot and Python audit
-scripts/             Ingestion, audit, local migration and hosting helpers
-tests/               Domain, database, research and HTTP integration checks
-docs/                Architecture, demo, screenshots and submission materials
-```
-
-## Submission and next steps
-
-The original brief asks for a mobile prototype, GitHub repository, genuine AI build history and covering note. [The covering note](docs/COVERING_NOTE.md) is drafted; it has **not** been emailed. Actual user-visible development messages and the supplied build prompt are preserved under `docs/development/`. That is a partial real export, not invented development history; keep the complete chat export/share link for submission.
-
-The source is published at [mrityunjaykumar23/FINN](https://github.com/mrityunjaykumar23/FINN), and the demo audience is public. Before submission, retain the complete AI chat export/share link and personalize the covering note. Planned engineering work: scheduled approved source ingestion, broader exchange coverage, queued large-document parsing, FTS/BM25 or semantic retrieval, stricter model entailment validation, automated structured statement extraction, and more verified guidance comparisons.
+Original source rebuilding remains available through `scripts/ingest.py` and `scripts/build-seed.py`; downloaded PDFs stay ignored. Existing public deployment and GitHub publication are unchanged until the user reviews and requests release.

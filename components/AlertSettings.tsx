@@ -15,6 +15,8 @@ import {
 import { useEffect, useState, type FormEvent } from "react";
 
 import { api, ErrorBox, labels, short, Skeleton } from "./common";
+import { Notifications } from "./Notifications";
+import { SystemStatus } from "./SystemStatus";
 export function AlertSettings({
   companies,
   onSave,
@@ -87,6 +89,8 @@ export function AlertSettings({
           END-OF-DAY ALERTS
         </span>
       </div>
+      <Notifications />
+      <SystemStatus />
       {error && <ErrorBox message={error} />}{" "}
       {!settings ? (
         <Skeleton rows={3} />

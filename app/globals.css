@@ -4270,3 +4270,8 @@ pre,
     scroll-behavior: auto !important;
   }
 }
+
+/* Runtime status and durable, owner-scoped notification history. */
+.system-status,.notification-panel{margin:20px 0;padding:20px;border:1px solid var(--border,#34413b);border-radius:8px;background:rgba(255,255,255,.015);overflow-wrap:anywhere}
+.system-status summary{cursor:pointer;font-size:13px;color:#bbccbf}.system-status p,.system-status li{font-size:12px;line-height:1.7;color:#a7b5ab}.system-status ul{padding-left:18px}
+.notice{padding:18px 0;border-top:1px solid #2b3931}.notice>div:first-child{display:flex;align-items:center;justify-content:space-between;gap:12px}.notice small{display:block;margin-top:9px;color:#9aa99e}.notice p{font-size:13px;line-height:1.6}.notice summary{font-size:12px;cursor:pointer}.notice.read{opacity:.8}.notice.dismissed{opacity:.6}.notice-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}.notification-panel select{max-width:130px;background:#17221d;color:#d9e3db;border:1px solid #34413b;padding:8px;border-radius:5px}.source-excerpt{white-space:pre-wrap;overflow-wrap:anywhere}

@@ -1,94 +1,461 @@
+// Mirrors the incremental SQL schema. FTS5 and synchronization triggers live in 0001_integrity.sql.
 import {
   sqliteTable,
   text,
   real,
   integer,
   primaryKey,
+  foreignKey,
+  index,
+  uniqueIndex,
+  check,
+  type AnySQLiteColumn,
 } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
 export const companies = sqliteTable("companies", {
-  ticker: text("ticker").primaryKey(),
+  ticker: text("ticker").notNull().primaryKey(),
   name: text("name").notNull(),
   sector: text("sector").notNull(),
   validation: text("validation").notNull(),
-  updatedAt: text("updated_at").notNull(),
+  updated_at: text("updated_at").notNull(),
 });
+export const owners = sqliteTable("owners", {
+  id: text("id").notNull().primaryKey(),
+  created_at: text("created_at").notNull(),
+  initialized_at: text("initialized_at"),
+});
+export const documents = sqliteTable(
+  "documents",
+  {
+    id: text("id").notNull().primaryKey(),
+    ticker: text("ticker")
+      .notNull()
+      .references((): AnySQLiteColumn => companies.ticker, {
+        onDelete: "restrict",
+      }),
+    title: text("title").notNull(),
+    type: text("type").notNull(),
+    period: text("period").notNull(),
+    url: text("url").notNull(),
+    published_at: text("published_at"),
+    retrieved_at: text("retrieved_at").notNull(),
+    hash: text("hash").notNull(),
+    mode: text("mode").notNull(),
+    publisher: text("publisher"),
+    extraction_status: text("extraction_status")
+      .notNull()
+      .default(sql`'complete'`),
+    total_pages: integer("total_pages"),
+    indexed_pages: integer("indexed_pages"),
+    period_status: text("period_status").notNull().default("unverified"),
+  },
+  (t) => [
+    index("documents_ticker_type_period").on(t.ticker, t.type, t.period),
+    uniqueIndex("documents_id_ticker_unique").on(t.id, t.ticker),
+    uniqueIndex("documents_hash_unique").on(t.hash),
+  ],
+);
+export const chunks = sqliteTable(
+  "document_chunks",
+  {
+    id: text("id").notNull().primaryKey(),
+    document_id: text("document_id").notNull(),
+    ticker: text("ticker").notNull(),
+    page: integer("page").notNull(),
+    text: text("text").notNull(),
+  },
+  (t) => [
+    foreignKey({
+      columns: [t.document_id, t.ticker],
+      foreignColumns: [documents.id, documents.ticker],
+    }).onDelete("cascade"),
+    index("chunks_document_page").on(t.document_id, t.page),
+  ],
+);
 export const portfolio = sqliteTable(
   "portfolio_companies",
   {
-    owner: text("owner").notNull(),
-    ticker: text("ticker").notNull(),
-    createdAt: text("created_at").notNull(),
+    owner: text("owner")
+      .notNull()
+      .references((): AnySQLiteColumn => owners.id, { onDelete: "cascade" }),
+    ticker: text("ticker")
+      .notNull()
+      .references((): AnySQLiteColumn => companies.ticker, {
+        onDelete: "restrict",
+      }),
+    created_at: text("created_at").notNull(),
   },
   (t) => [primaryKey({ columns: [t.owner, t.ticker] })],
 );
 export const preferences = sqliteTable("alert_preferences", {
-  owner: text("owner").primaryKey(),
+  owner: text("owner")
+    .notNull()
+    .primaryKey()
+    .references((): AnySQLiteColumn => owners.id, { onDelete: "cascade" }),
   settings: text("settings").notNull(),
-});
-export const documents = sqliteTable("documents", {
-  id: text("id").primaryKey(),
-  ticker: text("ticker").notNull(),
-  title: text("title").notNull(),
-  type: text("type").notNull(),
-  period: text("period").notNull(),
-  url: text("url").notNull(),
-  publishedAt: text("published_at"),
-  retrievedAt: text("retrieved_at").notNull(),
-  hash: text("hash").notNull().unique(),
-  mode: text("mode").notNull(),
-});
-export const chunks = sqliteTable("document_chunks", {
-  id: text("id").primaryKey(),
-  documentId: text("document_id").notNull(),
-  ticker: text("ticker").notNull(),
-  page: integer("page").notNull(),
-  text: text("text").notNull(),
-});
-export const announcements = sqliteTable("announcements", {
-  id: text("id").primaryKey(),
-  ticker: text("ticker").notNull(),
-  hash: text("hash").notNull().unique(),
-  documentId: text("document_id").notNull(),
-  date: text("date").notNull(),
-  payload: text("payload").notNull(),
 });
 export const prices = sqliteTable(
   "daily_prices",
   {
-    ticker: text("ticker").notNull(),
+    ticker: text("ticker")
+      .notNull()
+      .references((): AnySQLiteColumn => companies.ticker, {
+        onDelete: "restrict",
+      }),
     date: text("date").notNull(),
     close: real("close").notNull(),
-    adjustedClose: real("adjusted_close").notNull(),
+    adjusted_close: real("adjusted_close").notNull(),
     volume: real("volume").notNull(),
     source: text("source").notNull(),
-    retrievedAt: text("retrieved_at").notNull(),
+    retrieved_at: text("retrieved_at").notNull(),
     mode: text("mode").notNull(),
   },
-  (t) => [primaryKey({ columns: [t.ticker, t.date, t.mode] })],
+  (t) => [
+    primaryKey({ columns: [t.ticker, t.date, t.mode] }),
+    index("prices_ticker_mode_date").on(t.ticker, t.mode, t.date),
+  ],
 );
-export const metrics = sqliteTable("financial_metrics", {
+export const announcements = sqliteTable(
+  "announcements",
+  {
+    id: text("id").notNull().primaryKey(),
+    ticker: text("ticker").notNull(),
+    hash: text("hash").notNull(),
+    document_id: text("document_id").notNull(),
+    date: text("date").notNull(),
+    payload: text("payload").notNull(),
+    headline: text("headline")
+      .notNull()
+      .default(sql`''`),
+    category: text("category")
+      .notNull()
+      .default(sql`'unclassified'`),
+    summary: text("summary")
+      .notNull()
+      .default(sql`''`),
+    why_it_matters: text("why_it_matters")
+      .notNull()
+      .default(sql`''`),
+    published_at: text("published_at"),
+    detected_at: text("detected_at"),
+    source_url: text("source_url"),
+    classification_method: text("classification_method")
+      .notNull()
+      .default(sql`'human_reviewed'`),
+    classification_confidence: text("classification_confidence"),
+    materiality_score: real("materiality_score")
+      .notNull()
+      .default(sql`0`),
+    materiality_reason: text("materiality_reason"),
+    severity: real("severity")
+      .notNull()
+      .default(sql`0`),
+    magnitude: real("magnitude")
+      .notNull()
+      .default(sql`0`),
+    novelty: real("novelty")
+      .notNull()
+      .default(sql`0`),
+    evidence_coverage: real("evidence_coverage")
+      .notNull()
+      .default(sql`0`),
+    verification_status: text("verification_status")
+      .notNull()
+      .default(sql`'source_linked'`),
+    ingestion_mode: text("ingestion_mode")
+      .notNull()
+      .default(sql`'historical'`),
+  },
+  (t) => [
+    foreignKey({
+      columns: [t.document_id, t.ticker],
+      foreignColumns: [documents.id, documents.ticker],
+    }).onDelete("restrict"),
+    index("announcements_mode_date").on(t.ingestion_mode, t.published_at),
+    index("announcements_category_priority").on(
+      t.category,
+      t.materiality_score,
+    ),
+    index("announcements_ticker_date").on(t.ticker, t.published_at),
+    uniqueIndex("announcements_hash_unique").on(t.hash),
+  ],
+);
+export const metrics = sqliteTable(
+  "financial_metrics",
+  {
+    id: text("id").notNull().primaryKey(),
+    ticker: text("ticker").notNull(),
+    name: text("name").notNull(),
+    value: real("value"),
+    period: text("period").notNull(),
+    unit: text("unit").notNull(),
+    basis: text("basis").notNull(),
+    document_id: text("document_id").notNull(),
+    page: integer("page").notNull(),
+    currency: text("currency"),
+    scale: text("scale"),
+    fiscal_year: integer("fiscal_year"),
+    fiscal_quarter: integer("fiscal_quarter"),
+    period_start: text("period_start"),
+    period_end: text("period_end"),
+    value_type: text("value_type")
+      .notNull()
+      .default(sql`'reported'`),
+    calculation_method: text("calculation_method"),
+    evidence_text: text("evidence_text")
+      .notNull()
+      .default(sql`''`),
+    extraction_method: text("extraction_method")
+      .notNull()
+      .default(sql`'reviewed_seed'`),
+    verification_status: text("verification_status")
+      .notNull()
+      .default(sql`'reviewed'`),
+    updated_at: text("updated_at")
+      .notNull()
+      .default(sql`''`),
+  },
+  (t) => [
+    foreignKey({
+      columns: [t.document_id, t.ticker],
+      foreignColumns: [documents.id, documents.ticker],
+    }).onDelete("restrict"),
+    index("metrics_comparable").on(t.ticker, t.name, t.period, t.basis),
+  ],
+);
+export const alerts = sqliteTable(
+  "alerts",
+  {
+    id: text("id").notNull().primaryKey(),
+    owner: text("owner")
+      .notNull()
+      .references((): AnySQLiteColumn => owners.id, { onDelete: "cascade" }),
+    payload: text("payload").notNull(),
+    triggered_at: text("triggered_at").notNull(),
+    ticker: text("ticker").references((): AnySQLiteColumn => companies.ticker, {
+      onDelete: "restrict",
+    }),
+    event_type: text("event_type")
+      .notNull()
+      .default(sql`'legacy'`),
+    rule_id: text("rule_id"),
+    event_reference: text("event_reference"),
+    announcement_id: text("announcement_id").references(
+      (): AnySQLiteColumn => announcements.id,
+      { onDelete: "restrict" },
+    ),
+    observed_at: text("observed_at"),
+    status: text("status")
+      .notNull()
+      .default(sql`'unread'`),
+    read_at: text("read_at"),
+    dismissed_at: text("dismissed_at"),
+    priority: real("priority")
+      .notNull()
+      .default(sql`0`),
+    evidence_reference: text("evidence_reference"),
+    mode: text("mode")
+      .notNull()
+      .default(sql`'historical'`),
+  },
+  (t) => [
+    index("alerts_owner_state_time").on(t.owner, t.status, t.triggered_at),
+  ],
+);
+export const cache = sqliteTable(
+  "analysis_cache",
+  {
+    key: text("key").notNull().primaryKey(),
+    payload: text("payload").notNull(),
+    created_at: text("created_at").notNull(),
+    expires_at: text("expires_at"),
+    ticker: text("ticker"),
+    document_version: text("document_version"),
+    metric_version: text("metric_version"),
+    model: text("model"),
+    prompt_version: text("prompt_version"),
+    kind: text("kind")
+      .notNull()
+      .default(sql`'research'`),
+  },
+  (t) => [
+    index("cache_document_version").on(t.ticker, t.document_version),
+    index("cache_expiry").on(t.expires_at),
+  ],
+);
+export const guidanceStatements = sqliteTable(
+  "guidance_statements",
+  {
+    id: text("id").primaryKey(),
+    ticker: text("ticker").notNull(),
+    metric: text("metric").notNull(),
+    statement_text: text("statement_text").notNull(),
+    guidance_type: text("guidance_type").notNull(),
+    target_min: real("target_min"),
+    target_max: real("target_max"),
+    unit: text("unit").notNull(),
+    basis: text("basis").notNull(),
+    stated_at: text("stated_at"),
+    target_period: text("target_period").notNull(),
+    document_id: text("document_id").notNull(),
+    page: integer("page").notNull(),
+    relevant_quote: text("relevant_quote").notNull(),
+    qualifiers: text("qualifiers")
+      .notNull()
+      .default(sql`''`),
+    extraction_confidence: real("extraction_confidence")
+      .notNull()
+      .default(sql`0`),
+    verification_status: text("verification_status")
+      .notNull()
+      .default(sql`'source_checked'`),
+    revision_of: text("revision_of").references(
+      (): AnySQLiteColumn => guidanceStatements.id,
+      { onDelete: "no action" },
+    ),
+  },
+  (t) => [
+    foreignKey({
+      columns: [t.document_id, t.ticker],
+      foreignColumns: [documents.id, documents.ticker],
+    }).onDelete("restrict"),
+    index("guidance_target").on(t.ticker, t.metric, t.target_period),
+    uniqueIndex(
+      "guidance_statements_ticker_metric_target_period_document_id_page_basis_unique",
+    ).on(t.ticker, t.metric, t.target_period, t.document_id, t.page, t.basis),
+  ],
+);
+export const guidanceComparisons = sqliteTable(
+  "guidance_comparisons",
+  {
+    id: text("id").primaryKey(),
+    statement_id: text("statement_id")
+      .notNull()
+      .references((): AnySQLiteColumn => guidanceStatements.id, {
+        onDelete: "cascade",
+      }),
+    metric_id: text("metric_id")
+      .notNull()
+      .references((): AnySQLiteColumn => metrics.id, { onDelete: "restrict" }),
+    status: text("status").notNull(),
+    variance: real("variance"),
+    explanation: text("explanation").notNull(),
+    compared_at: text("compared_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("guidance_comparisons_statement_id_metric_id_unique").on(
+      t.statement_id,
+      t.metric_id,
+    ),
+  ],
+);
+export const ingestionRuns = sqliteTable(
+  "ingestion_runs",
+  {
+    id: text("id").primaryKey(),
+    provider: text("provider").notNull(),
+    ticker: text("ticker").references((): AnySQLiteColumn => companies.ticker, {
+      onDelete: "no action",
+    }),
+    started_at: text("started_at").notNull(),
+    finished_at: text("finished_at"),
+    status: text("status").notNull(),
+    discovered: integer("discovered")
+      .notNull()
+      .default(sql`0`),
+    inserted: integer("inserted")
+      .notNull()
+      .default(sql`0`),
+    duplicates: integer("duplicates")
+      .notNull()
+      .default(sql`0`),
+    error: text("error"),
+  },
+  (t) => [
+    index("runs_provider_ticker_time").on(t.provider, t.ticker, t.started_at),
+  ],
+);
+export const sourceSync = sqliteTable(
+  "source_sync",
+  {
+    provider: text("provider").notNull(),
+    ticker: text("ticker")
+      .notNull()
+      .references((): AnySQLiteColumn => companies.ticker, {
+        onDelete: "no action",
+      }),
+    last_success: text("last_success"),
+    last_attempt: text("last_attempt"),
+    next_retry: text("next_retry"),
+    status: text("status").notNull(),
+    error: text("error"),
+  },
+  (t) => [primaryKey({ columns: [t.provider, t.ticker] })],
+);
+export const requestBudgets = sqliteTable(
+  "request_budgets",
+  {
+    scope: text("scope").notNull(),
+    bucket: text("bucket").notNull(),
+    used: integer("used")
+      .notNull()
+      .default(sql`0`),
+  },
+  (t) => [primaryKey({ columns: [t.scope, t.bucket] })],
+);
+export const aiOperations = sqliteTable("ai_operations", {
   id: text("id").primaryKey(),
-  ticker: text("ticker").notNull(),
-  name: text("name").notNull(),
-  value: real("value"),
-  period: text("period").notNull(),
-  unit: text("unit").notNull(),
-  basis: text("basis").notNull(),
-  documentId: text("document_id").notNull(),
-  page: integer("page").notNull(),
+  ticker: text("ticker"),
+  task: text("task").notNull(),
+  model: text("model"),
+  status: text("status").notNull(),
+  created_at: text("created_at").notNull(),
+  duration_ms: integer("duration_ms")
+    .notNull()
+    .default(sql`0`),
+  input_tokens: integer("input_tokens")
+    .notNull()
+    .default(sql`0`),
+  output_tokens: integer("output_tokens")
+    .notNull()
+    .default(sql`0`),
+  cache_hit: integer("cache_hit")
+    .notNull()
+    .default(sql`0`),
+  error_code: text("error_code"),
 });
-export const alerts = sqliteTable("alerts", {
-  id: text("id").primaryKey(),
-  owner: text("owner").notNull(),
-  payload: text("payload").notNull(),
-  triggeredAt: text("triggered_at").notNull(),
-});
-export const cache = sqliteTable("analysis_cache", {
+export const jobLocks = sqliteTable("job_locks", {
   key: text("key").primaryKey(),
-  payload: text("payload").notNull(),
-  createdAt: text("created_at").notNull(),
+  expires_at: text("expires_at").notNull(),
 });
 export const meta = sqliteTable("meta", {
-  key: text("key").primaryKey(),
+  key: text("key").notNull().primaryKey(),
   value: text("value").notNull(),
 });
+export const metricDerivations = sqliteTable(
+  "metric_derivations",
+  {
+    id: text("id").primaryKey(),
+    ticker: text("ticker")
+      .notNull()
+      .references(() => companies.ticker),
+    name: text("name").notNull(),
+    current_metric_id: text("current_metric_id")
+      .notNull()
+      .references(() => metrics.id),
+    base_metric_id: text("base_metric_id")
+      .notNull()
+      .references(() => metrics.id),
+    value: real("value").notNull(),
+    unit: text("unit").notNull(),
+    formula: text("formula").notNull(),
+    updated_at: text("updated_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("derivations_inputs_unique").on(
+      t.name,
+      t.current_metric_id,
+      t.base_metric_id,
+    ),
+  ],
+);

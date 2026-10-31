@@ -1,6 +1,6 @@
 "use client";
 
-import { percentChange } from "@/lib/domain";
+import { quarterlyComparisons } from "@/lib/periods";
 import type { Metric, RankedFiling } from "@/lib/types";
 import { ArrowUpRight, BarChart3, ChevronDown, FileText } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -144,12 +144,14 @@ export function FinancialTable({
   metrics: Metric[];
   sourceUrls: Record<string, string>;
 }) {
-  const periods = ["Q4 FY2025", "Q3 FY2025", "Q4 FY2024"];
+  const comparisons = quarterlyComparisons(metrics);
+  const periods = comparisons[0].periods;
   return (
     <section className="financial-section">
       <h3>The quarter, in numbers</h3>
       <p className="muted">
-        ₹ crore · {metrics[0]?.basis ?? "Accounting basis unavailable"}
+        {metrics[0]?.unit ?? "Unit unavailable"} ·{" "}
+        {metrics[0]?.basis ?? "Accounting basis unavailable"}
       </p>
       <div className="table-scroll">
         <table className="financial-table">
@@ -164,16 +166,22 @@ export function FinancialTable({
             </tr>
           </thead>
           <tbody>
-            {["Revenue", "EBITDA", "PBT", "PAT"].map((name) => {
-              const values = periods.map((p) =>
-                metrics.find((m) => m.name === name && m.period === p),
-              );
-              const a = values[0]?.value ?? null,
-                b = values[1]?.value ?? null,
-                c = values[2]?.value ?? null;
+            {comparisons.map(({ name, values, qoq, yoy }) => {
               return (
                 <tr key={name}>
-                  <th>{name}</th>
+                  <th>
+                    {name}
+                    <small
+                      className="muted"
+                      style={{
+                        display: "block",
+                        maxWidth: 160,
+                        fontWeight: 400,
+                      }}
+                    >
+                      {values[0]?.unit} · {values[0]?.basis}
+                    </small>
+                  </th>
                   {values.map((m, i) => (
                     <td key={i}>
                       {m?.value == null ? (
@@ -184,7 +192,7 @@ export function FinancialTable({
                           target="_blank"
                           rel="noreferrer"
                           title={`${m.period} · ${m.basis} · PDF page ${m.page}`}
-                          aria-label={`${name}, ${m.period}: ${num(m.value, 0)} crore; open source page ${m.page}`}
+                          aria-label={`${name}, ${m.period}: ${num(m.value, 0)} ${m.unit}, ${m.basis}; open source page ${m.page}`}
                         >
                           {num(m.value, 0)}
                           <sup>{m.page}</sup>
@@ -192,8 +200,8 @@ export function FinancialTable({
                       )}
                     </td>
                   ))}
-                  <td>{pct(percentChange(a, b).value)}</td>
-                  <td>{pct(percentChange(a, c).value)}</td>
+                  <td>{pct(qoq)}</td>
+                  <td>{pct(yoy)}</td>
                 </tr>
               );
             })}
@@ -201,9 +209,9 @@ export function FinancialTable({
         </table>
       </div>
       <p className="table-note">
-        Superscripts refer to source PDF pages. PAT is attributable to
-        shareholders. Missing metrics are not approximated. Growth ratios with a
-        zero or negative base are unavailable.
+        Superscripts refer to source PDF pages. PAT retains its source's
+        reported definition. Missing metrics are not approximated. Growth ratios
+        with a zero or negative base are unavailable.
       </p>
     </section>
   );

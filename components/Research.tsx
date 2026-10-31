@@ -52,6 +52,8 @@ import {
   TickerIcon,
 } from "./common";
 
+import { sortPeriods } from "@/lib/periods";
+import { SystemStatus } from "./SystemStatus";
 type Overview = {
   company: Company;
   metrics: Metric[];
@@ -94,7 +96,7 @@ export function ResearchView({
     [type, setType] = useState(""),
     [period, setPeriod] = useState(""),
     [chartType, setChartType] = useState("price"),
-    [metricPeriod, setMetricPeriod] = useState("Q4 FY2025");
+    [metricPeriod, setMetricPeriod] = useState("");
   const answerRef = useRef<HTMLDivElement>(null);
   const ask = useCallback(
     async (q: string, filters: { type?: string; period?: string } = {}) => {
@@ -107,13 +109,26 @@ export function ResearchView({
           body: JSON.stringify({ ticker, question: q, ...filters }),
         });
         setAnswer(data);
+        const updated = await api<Overview>(
+          `companies/${encodeURIComponent(ticker)}/overview?mode=${mode}`,
+        );
+        setOverview(updated);
+        setMetricPeriod((current) =>
+          updated.metrics.some((m) => m.period === current)
+            ? current
+            : (sortPeriods(updated.metrics.map((m) => m.period)).find((p) =>
+                p.startsWith("Q"),
+              ) ??
+              sortPeriods(updated.metrics.map((m) => m.period))[0] ??
+              ""),
+        );
       } catch (e) {
         setError((e as Error).message);
       } finally {
         setAsking(false);
       }
     },
-    [ticker],
+    [ticker, mode],
   );
   useEffect(() => {
     let active = true;
@@ -130,6 +145,13 @@ export function ResearchView({
       .then((d) => {
         if (active) {
           setOverview(d);
+          setMetricPeriod(
+            sortPeriods(d.metrics.map((m) => m.period)).find((p) =>
+              p.startsWith("Q"),
+            ) ??
+              sortPeriods(d.metrics.map((m) => m.period))[0] ??
+              "",
+          );
           if (initialQuestion) void ask(initialQuestion);
         }
       })
@@ -210,6 +232,7 @@ export function ResearchView({
           Find a company
         </button>
       </div>
+      <SystemStatus compact />
       <div className="research-examples">
         <span>EXPLORE BEYOND YOUR PORTFOLIO</span>
         {["ASIANPAINT.NS", "PERSISTENT.NS", "DMART.NS"].map((t) => (
@@ -523,7 +546,7 @@ export function ResearchView({
                       value={metricPeriod}
                       onChange={(e) => setMetricPeriod(e.target.value)}
                     >
-                      {["Q4 FY2025", "FY2025", "Q3 FY2025", "FY2024"].map(
+                      {sortPeriods(overview.metrics.map((m) => m.period)).map(
                         (p) => (
                           <option key={p}>{p}</option>
                         ),
@@ -531,7 +554,15 @@ export function ResearchView({
                     </select>
                   </label>
                   {["Revenue", "EBITDA", "PBT", "PAT"].map((name) => {
-                    const m = activeMetrics.find((m) => m.name === name);
+                    const m = [...activeMetrics]
+                      .sort(
+                        (a, b) =>
+                          Number(/consolidated/i.test(b.basis)) * 2 +
+                          Number(b.unit === "INR crore") -
+                          (Number(/consolidated/i.test(a.basis)) * 2 +
+                            Number(a.unit === "INR crore")),
+                      )
+                      .find((m) => m.name === name);
                     const doc = overview.documents.find(
                       (d) => d.id === m?.document_id,
                     );
@@ -542,21 +573,21 @@ export function ResearchView({
                           {m?.value == null ? (
                             <small>Not reported</small>
                           ) : (
-                            `₹${num(m.value, 0)}`
+                            `${m.unit.startsWith("INR") ? "₹" : m.unit.startsWith("USD") ? "$" : ""}${num(m.value, 0)}`
                           )}
                         </strong>
                         {m && doc && (
                           <SourceLink url={doc.url} page={m.page}>
-                            PDF p.{m.page}
+                            PDF p.{m.page} · {m.unit} · {m.basis}
                           </SourceLink>
                         )}
                       </div>
                     );
                   })}
                   <p>
-                    ₹ crore ·{" "}
-                    {activeMetrics[0]?.basis ??
-                      "No validated extraction for this period"}
+                    {activeMetrics.length
+                      ? "Each value retains its reported unit and accounting basis."
+                      : "No validated extraction for this period"}
                   </p>
                 </section>
                 {!!overview.guidance.length && (
@@ -590,6 +621,13 @@ export function ResearchView({
                         <strong>{d.type.replaceAll("_", " ")}</strong>
                         <span>{d.period}</span>
                         <span>Indexed {date(d.retrieved_at)}</span>
+                        {d.extraction_status && (
+                          <span>
+                            {d.extraction_status} extraction ·{" "}
+                            {d.indexed_pages ?? "?"}/{d.total_pages ?? "?"}{" "}
+                            pages · period {d.period_status ?? "unverified"}
+                          </span>
+                        )}
                         <SourceLink url={d.url}>
                           Open primary document
                         </SourceLink>
@@ -633,7 +671,29 @@ export function ResearchAnswer({ answer }: { answer: Research }) {
         {answer.engine}
         {answer.cached && <span> · cached result</span>}
       </div>
-      {answer.key_findings.map((finding, i) => (
+      {answer.ai_status && (
+        <p className="muted">
+          AI execution: {answer.ai_status}
+          {answer.generated_at
+            ? ` · ${new Date(answer.generated_at).toLocaleString()}`
+            : ""}
+        </p>
+      )}
+      {[
+        ...answer.key_findings,
+        ...(answer.management_commentary ?? []).map((f) => ({
+          ...f,
+          text: `Management commentary: ${f.text}`,
+        })),
+        ...(answer.positive_factors ?? []).map((f) => ({
+          ...f,
+          text: `Positive case: ${f.text}`,
+        })),
+        ...(answer.risks ?? []).map((f) => ({
+          ...f,
+          text: `Risk case: ${f.text}`,
+        })),
+      ].map((finding, i) => (
         <details
           className="finding"
           key={`${answer.question}-${i}`}
@@ -670,6 +730,14 @@ export function ResearchAnswer({ answer }: { answer: Research }) {
             >
               {finding.text}
             </div>
+            {finding.evidence_excerpt && (
+              <blockquote className="source-excerpt">
+                {finding.evidence_excerpt}
+              </blockquote>
+            )}
+            {finding.uncertainty_note && (
+              <p className="muted">{finding.uncertainty_note}</p>
+            )}
             <div className="finding-links">
               {finding.source_ids.map((id) => {
                 const source = answer.source_references.find(

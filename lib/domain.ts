@@ -79,6 +79,13 @@ export type Metric = {
   basis: string;
   document_id: string;
   page: number;
+  verification_status?: string;
+  evidence_text?: string;
+  extraction_method?: string;
+  currency?: string | null;
+  scale?: string | null;
+  fiscal_year?: number | null;
+  fiscal_quarter?: number | null;
 };
 export type Guidance = {
   ticker: string;
@@ -95,6 +102,10 @@ export type Guidance = {
   actual_document: string;
   actual_page: number;
   qualifier: string;
+  id?: string;
+  unit?: string;
+  guidance_type?: string;
+  revised?: boolean;
 };
 export function percentChange(current: number | null, base: number | null) {
   if (
@@ -296,14 +307,19 @@ export function compareGuidance(g: Guidance) {
     return {
       status: "Insufficient comparable evidence",
       variance: null,
-      explanation: "The periods or accounting definitions do not align.",
+      explanation: !Number.isFinite(g.actual)
+        ? "No verified actual on the same period, unit and accounting basis is available."
+        : "The periods or accounting definitions do not align.",
     };
   const variance =
-    g.actual < g.low
+    g.actual < g.low && g.guidance_type !== "maximum"
       ? g.actual - g.low
-      : g.actual > g.high
+      : g.actual > g.high && g.guidance_type !== "minimum"
         ? g.actual - g.high
         : 0;
+  const unit = g.unit ?? "%",
+    suffix = unit === "%" ? "%" : ` ${unit}`,
+    difference = unit === "%" ? "percentage points" : unit;
   return {
     status:
       variance < 0
@@ -314,10 +330,10 @@ export function compareGuidance(g: Guidance) {
     variance,
     explanation:
       variance < 0
-        ? `Reported ${g.actual}% was ${Math.abs(variance).toFixed(1)} percentage points below the ${g.low}% lower bound.`
+        ? `Reported ${g.actual}${suffix} was ${Math.abs(variance).toFixed(1)} ${difference} below the ${g.low}${suffix} lower bound.`
         : variance > 0
-          ? `Reported ${g.actual}% was ${variance.toFixed(1)} percentage points above the ${g.high}% upper bound.`
-          : `Reported ${g.actual}% was within the ${g.low}–${g.high}% guidance range.`,
+          ? `Reported ${g.actual}${suffix} was ${variance.toFixed(1)} ${difference} above the ${g.high}${suffix} upper bound.`
+          : `Reported ${g.actual}${suffix} was ${g.guidance_type === "minimum" ? "at or above the stated minimum" : g.guidance_type === "maximum" ? "at or below the stated maximum" : `within the ${g.low}–${g.high}${suffix} guidance range`}.`,
   };
 }
 export function normalizeTicker(raw: string) {

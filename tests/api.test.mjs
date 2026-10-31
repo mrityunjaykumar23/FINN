@@ -100,7 +100,10 @@ test("research cites actual primary documents and excludes cross-company passage
       assert.ok(source.page > 0);
       assert.ok(new URL(source.url).protocol === "https:");
     }
-    assert.match(data.engine, /Source retrieval|Deterministic calculation/);
+    assert.match(
+      data.engine,
+      /Source retrieval|Deterministic calculation|Gemini/,
+    );
   }
 });
 test("a missing passage produces neither a company conclusion nor a fake citation", async () => {
@@ -120,10 +123,17 @@ test("guidance links both matching-period sources and computes the miss", async 
   assert.ok(Math.abs(revenue.variance + 0.3) < 1e-8);
   assert.equal(revenue.sources.length, 2);
   assert.ok(revenue.sources.every((s) => s.url && s.page));
-  assert.equal(
-    (await request("research/ASIANPAINT.NS/guidance")).data.comparisons.length,
-    0,
-  );
+  // Research can now discover genuine guidance beyond the original two examples.
+  for (const g of (await request("research/ASIANPAINT.NS/guidance")).data
+    .comparisons) {
+    assert.equal(g.ticker, "ASIANPAINT.NS");
+    assert.ok(g.sources[0]?.url && g.sources[0]?.page);
+    if (g.variance !== null) {
+      assert.equal(g.sources.length, 2);
+      assert.equal(g.period, g.actual_period);
+      assert.equal(g.basis, g.actual_basis);
+    } else assert.equal(g.status, "Insufficient comparable evidence");
+  }
 });
 test("validation, missing evidence, and protected ingestion return structured errors", async () => {
   for (const [path, method, body, status] of [

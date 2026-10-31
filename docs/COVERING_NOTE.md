@@ -1,24 +1,17 @@
-Subject: ENAM - IIT screening - 2027
+# Draft covering note — prepare after local review
 
-Dear ENAM team,
+Dear ENAM Holdings assessment team,
 
-I built FINN as a compact investment desk around one loop: discover a signal, understand why it matters, inspect the original evidence, and investigate further.
+FINN is an investment intelligence copilot built around a prioritised portfolio briefing and primary-source company research. It preserves a mobile-first interface, an 18-company starter watchlist, real stored EOD observations, configurable alerts and inspectable source pages.
 
-The prototype includes an 18-company portfolio, a windowed and ranked briefing, configurable EOD price/volume triggers, primary-source research on companies outside the portfolio, and a management guidance tracker. The signature example compares Infosys's revised FY2025 guidance with its reported outcome, using matching constant-currency definitions and links to both primary documents.
+The local upgrade adds durable owner-isolated SQLite storage, normalized filings and metrics, native Gemini classification/extraction/research, bounded source discovery, notification read/dismiss state, source-linked quarterly calculations and database-backed management guidance with revisions. Real local tests include a previously unseen NSE ticker, authentic imported NSE filings, dynamic HCLTech guidance/actual matching and restart durability.
 
-The demo works without AI credentials. It uses authentic cached company documents and historical price observations, deterministic financial calculations, and an optional server-side model adapter. Research on uncached NSE tickers attempts validation, document discovery, PDF extraction and indexing. I verified that path using COFORGE.NS as well as the cached examples.
+Existing published repository: https://github.com/mrityunjaykumar23/FINN
+Existing published demo: https://finn-investment-intelligence-mrity.hazyanole2049.chatgpt.site
 
-I chose a same-origin React/TypeScript Worker backend and persistent SQLite to keep the deployed demonstration self-contained, with Python for ingestion and independent calculation validation. I deliberately left out phone notifications, trading, elaborate authentication, a separate vector service, and any claim of comprehensive real-time exchange coverage. The curated historical briefing covers two companies, and that limitation is visible in the product.
+**Release status:** the upgrade is committed locally on `upgrade/sqlite-gemini-push-pull` and has not been pushed or deployed. Update this note and the reviewer links only after the user reviews the tested local version and requests publication.
 
-Next I would widen approved source coverage, add scheduled ingestion and queued PDF processing, improve semantic retrieval and citation-entailment checks, and extend the guidance tracker with verified comparable periods for more companies.
-
-Demo: [FINN](https://finn-investment-intelligence-mrity.hazyanole2049.chatgpt.site)
-
-Repository: [mrityunjaykumar23/FINN](https://github.com/mrityunjaykumar23/FINN)
-
-AI build history: `docs/development/CONVERSATION.md` contains actual user/assistant messages from the development chat. It is an honest partial export, not a fabricated reconstruction. Keep the complete chat export/share link with the submission.
-
-The deployed demo is public and opens without sign-in. This file is a draft and has not been emailed.
+The application reports source gaps, absent financial metrics, incompatible definitions and AI failures explicitly. It does not claim a complete exchange feed or phone notification service. The verification record and genuine development history accompany the source. No API key is committed.
 
 Regards,
-[Your name]
+[Add your preferred name/contact before sending]

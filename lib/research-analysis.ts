@@ -5,6 +5,7 @@ import {
   type Metric,
   type Guidance,
 } from "./domain.ts";
+import { comparisonPeriods, sortPeriods } from "./periods.ts";
 export type CalculatedFinding = {
   text: string;
   sources: { document_id: string; page: number }[];
@@ -16,12 +17,19 @@ export function calculateFindings(
   question: string,
   metrics: Metric[],
   guidance: Guidance[],
+  requestedPeriod?: string,
 ): CalculatedFinding[] {
   const q = question.toLowerCase(),
-    rows = metrics.filter((m) => m.ticker === ticker),
+    rows = metrics.filter(
+      (m) => m.ticker === ticker && m.verification_status !== "unverified",
+    ),
     findings: CalculatedFinding[] = [];
   const money = (v: number) =>
     new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(v);
+  const amount = (m: Metric) =>
+    m.unit === "INR crore"
+      ? `₹${money(m.value!)} crore`
+      : `${money(m.value!)} ${m.unit}`;
   const source = (m: Metric) => ({ document_id: m.document_id, page: m.page });
   const comparable = (
     a: Metric | undefined,
@@ -39,6 +47,7 @@ export function calculateFindings(
     const relevant = guidance.filter(
       (g) =>
         g.ticker === ticker &&
+        (!requestedPeriod || g.period === requestedPeriod) &&
         (!/margin/.test(q) || g.metric === "Operating margin") &&
         (!/revenue/.test(q) || g.metric === "Revenue growth"),
     );
@@ -55,12 +64,22 @@ export function calculateFindings(
     }
   }
   if (/cash|conversion|profitability/.test(q)) {
-    const pat = rows.find((m) => m.name === "PAT" && m.period === "FY2025"),
+    const cashPeriod =
+      requestedPeriod ??
+      sortPeriods(
+        rows
+          .filter(
+            (m) =>
+              m.name === "Operating cash flow" || m.name === "Free cash flow",
+          )
+          .map((m) => m.period),
+      ).find((p) => /^FY/.test(p));
+    const pat = rows.find((m) => m.name === "PAT" && m.period === cashPeriod),
       ocf = rows.find(
-        (m) => m.name === "Operating cash flow" && m.period === "FY2025",
+        (m) => m.name === "Operating cash flow" && m.period === cashPeriod,
       ),
       fcf = rows.find(
-        (m) => m.name === "Free cash flow" && m.period === "FY2025",
+        (m) => m.name === "Free cash flow" && m.period === cashPeriod,
       );
     const cash = ocf ?? fcf;
     if (
@@ -72,7 +91,7 @@ export function calculateFindings(
     ) {
       const conversion = ratio(cash.value, pat.value)! * 100;
       findings.push({
-        text: `FY2025 ${cash.name.toLowerCase()} was ₹${money(cash.value)} crore, or ${conversion.toFixed(1)}% of attributable PAT of ₹${money(pat.value)} crore. This is calculated from consolidated INR figures; it can differ from a company ratio using another profit definition or currency. One year alone does not establish sustained cash quality.`,
+        text: `${cashPeriod} ${cash.name.toLowerCase()} was ${amount(cash)}, or ${conversion.toFixed(1)}% of attributable PAT of ${amount(pat)}. This is calculated from ${/consolidated/i.test(cash.basis) ? "consolidated" : "standalone"} ${cash.unit.startsWith("INR") ? "INR" : cash.unit} figures; it can differ from a company ratio using another profit definition or currency. One year alone does not establish sustained cash quality.`,
         sources: [source(cash), source(pat)],
       });
     }
@@ -83,21 +102,30 @@ export function calculateFindings(
       comparable(ocf, fcf, true)
     )
       findings.push({
-        text: `FY2025 reported free cash flow was ₹${money(fcf.value)} crore. Free cash flow is after capital expenditure; inspect the cash-flow statement for working-capital movements.`,
+        text: `FY2025 reported free cash flow was ${amount(fcf)}. Free cash flow is after capital expenditure; inspect the cash-flow statement for working-capital movements.`,
         sources: [source(fcf)],
       });
   }
   if (/revenue|growth/.test(q) && !/guidance|promise|deliver/.test(q)) {
     const annual = /annual|multi.year|full.year/.test(q),
-      currentPeriod = annual ? "FY2025" : "Q4 FY2025";
+      currentPeriod =
+        requestedPeriod ??
+        (annual
+          ? sortPeriods(
+              rows
+                .filter((m) => m.name === "Revenue" && /^FY/.test(m.period))
+                .map((m) => m.period),
+            )[0]
+          : comparisonPeriods(rows)[0]);
+    const periods = comparisonPeriods(rows, currentPeriod);
     const current = rows.find(
       (m) => m.name === "Revenue" && m.period === currentPeriod,
     );
     const comparisons = annual
-      ? [["FY2024", "year on year"]]
+      ? [[periods[1], "year on year"]]
       : [
-          ["Q3 FY2025", "quarter on quarter"],
-          ["Q4 FY2024", "year on year"],
+          [periods[1], "quarter on quarter"],
+          [periods[2], "year on year"],
         ];
     for (const [period, label] of comparisons) {
       const base = rows.find(
@@ -107,7 +135,7 @@ export function calculateFindings(
         const change = percentChange(current.value, base.value);
         if (change.value !== null)
           findings.push({
-            text: `${currentPeriod} reported INR revenue was ₹${money(current.value)} crore, ${change.value >= 0 ? "up" : "down"} ${Math.abs(change.value).toFixed(2)}% ${label} from ₹${money(base.value!)} crore in ${period}. This calculation uses ${current.basis}; it is not constant-currency growth.`,
+            text: `${currentPeriod} reported ${current.unit.startsWith("INR") ? "INR " : ""}revenue was ${amount(current)}, ${change.value >= 0 ? "up" : "down"} ${Math.abs(change.value).toFixed(2)}% ${label} from ${amount(base)} in ${period}. This calculation uses ${current.basis}; it is not constant-currency growth.`,
             sources: [source(current), source(base)],
           });
       }

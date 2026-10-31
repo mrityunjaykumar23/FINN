@@ -31,6 +31,17 @@ import {
 } from "@/lib/domain";
 import type { Company, Document, Metric } from "@/lib/types";
 
+import { budget } from "@/db/repository";
+import { providerStatus, extractDocument } from "@/lib/ai/service";
+import {
+  importFiling,
+  evaluateAlerts,
+  evaluateAll,
+  systemStatus,
+  trackSync,
+  persistComparisons,
+} from "@/lib/workflows";
+import { discoverDocuments } from "@/lib/server";
 const settingsSchema = z.object({
   price_threshold: z.number().min(0.1).max(100),
   volume_multiplier: z.number().min(1).max(50),
@@ -63,10 +74,29 @@ const questionSchema = z.object({
   type: z.enum(["annual_report", "transcript", "results"]).optional(),
 });
 async function body(request: Request) {
-  if (Number(request.headers.get("content-length") ?? 0) > 50000)
-    throw new ApiError(413, "request_too_large", "Request exceeds 50 KB");
+  const reader = request.body?.getReader();
+  if (!reader) throw new ApiError(400, "invalid_json", "Send valid JSON.");
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  while (true) {
+    const part = await reader.read();
+    if (part.done) break;
+    length += part.value.length;
+    if (length > 50000) {
+      await reader.cancel();
+      throw new ApiError(413, "request_too_large", "Request exceeds 50 KB");
+    }
+    chunks.push(part.value);
+  }
+  if(length===0)return {};
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const c of chunks) {
+    bytes.set(c, offset);
+    offset += c.length;
+  }
   try {
-    return await request.json();
+    return JSON.parse(new TextDecoder().decode(bytes));
   } catch {
     throw new ApiError(400, "invalid_json", "Send valid JSON.");
   }
@@ -80,20 +110,57 @@ function admin(request: Request) {
       "Ingestion requires a server-configured administrator token.",
     );
 }
+const tickerInput = z.object({ ticker: z.string().min(1).max(32) });
+const dateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/)
+  .refine(
+    (d) =>
+      Number.isFinite(Date.parse(d)) &&
+      new Date(d).toISOString().slice(0, 10) === d,
+    "Use a valid YYYY-MM-DD date.",
+  );
 async function handle(request: Request) {
   let owner = "";
+  const url = new URL(request.url);
   try {
-    const url = new URL(request.url),
-      path = decodeURIComponent(url.pathname.replace(/^\/api\//, "")).replace(
-        /\/$/,
-        "",
-      ),
+    const path = decodeURIComponent(
+        url.pathname.replace(/^\/api\//, ""),
+      ).replace(/\/$/, ""),
       method = request.method;
+    // Consume bounded mutation bodies before early error responses so Worker proxy streams remain reusable.
+    const parsedBody =
+      method !== "GET" && method !== "HEAD" && request.body
+        ? await body(request)
+        : {};
+
+    if (
+      method !== "GET" &&
+      request.headers.has("origin") &&
+      request.headers.get("origin") !== url.origin
+    )
+      throw new ApiError(
+        403,
+        "origin_rejected",
+        "Cross-origin mutations are not permitted.",
+      );
     await initialize();
     owner = await ownerFor(request);
     await ensureOwner(owner);
     const mode =
       url.searchParams.get("mode") === "live" ? "live" : "historical";
+    if (
+      method === "POST" &&
+      [
+        "research",
+        "market/refresh",
+        "portfolio",
+        "companies/refresh-documents",
+      ].includes(path)
+    ) {
+      await budget(`session:${owner}:${path}`, path === "research" ? 40 : 12);
+      await budget(`global:${path}`, path === "research" ? 200 : 60);
+    }
     let result: unknown;
     if (path === "health" && method === "GET")
       result = {
@@ -102,25 +169,31 @@ async function handle(request: Request) {
         snapshot: "2025-04-22",
         market: "end-of-day",
         research: "primary-source retrieval",
-        llm_configured: !!(env as unknown as Record<string, string>)
-          .LLM_API_KEY,
+        llm_configured: providerStatus().enabled,
       };
+    else if (path === "status" && method === "GET")
+      result = await systemStatus();
     else if (path === "portfolio" && method === "GET")
       result = { companies: await portfolioFor(owner, mode), mode };
     else if (path === "portfolio" && method === "POST") {
-      const input = z
-        .object({ ticker: z.string().max(32) })
-        .parse(await body(request));
-      const company = await resolveCompany(input.ticker);
+      const input = tickerInput.parse(parsedBody),
+        company = await resolveCompany(input.ticker);
       const count = await one<{ n: number }>(
-        "SELECT COUNT(*) AS n FROM portfolio_companies WHERE owner=?",
+        "SELECT count(*) n FROM portfolio_companies WHERE owner=?",
         owner,
       );
-      if ((count?.n ?? 0) >= 50)
+      if (
+        (count?.n ?? 0) >= 30 &&
+        !(await one(
+          "SELECT ticker FROM portfolio_companies WHERE owner=? AND ticker=?",
+          owner,
+          company.ticker,
+        ))
+      )
         throw new ApiError(
           422,
           "portfolio_limit",
-          "The prototype supports up to 50 portfolio companies.",
+          "Monitor up to 30 companies.",
         );
       await run(
         "INSERT OR IGNORE INTO portfolio_companies(owner,ticker,created_at) VALUES (?,?,?)",
@@ -139,41 +212,29 @@ async function handle(request: Request) {
     } else if (path === "alerts/settings" && method === "GET")
       result = await getSettings(owner);
     else if (path === "alerts/settings" && method === "PUT") {
-      const input = settingsSchema.parse(await body(request));
+      const input = settingsSchema.parse(parsedBody);
       await run(
-        "INSERT OR REPLACE INTO alert_preferences(owner,settings) VALUES (?,?)",
+        "INSERT INTO alert_preferences(owner,settings) VALUES (?,?) ON CONFLICT(owner) DO UPDATE SET settings=excluded.settings",
         owner,
         JSON.stringify(input),
       );
+      await evaluateAlerts(owner, "historical");
+      await evaluateAlerts(owner, "live");
       result = {
         settings: input,
-        message: "Alert rules saved. Briefing alerts will be recalculated.",
+        message: "Alert rules saved and latest stored sessions evaluated.",
       };
     } else if (path === "digest" && method === "GET") {
-      for (const key of ["start", "end"]) {
-        const value = url.searchParams.get(key);
-        if (
-          value &&
-          (!/^\d{4}-\d{2}-\d{2}$/.test(value) ||
-            !Number.isFinite(Date.parse(value)) ||
-            new Date(value).toISOString().slice(0, 10) !== value)
-        )
-          throw new ApiError(
-            422,
-            "invalid_date",
-            "Use a valid YYYY-MM-DD date.",
-          );
-      }
-      if (
-        url.searchParams.has("days") &&
-        (!Number.isFinite(Number(url.searchParams.get("days"))) ||
-          Number(url.searchParams.get("days")) < 1)
-      )
-        throw new ApiError(
-          422,
-          "invalid_window",
-          "Days must be a positive number.",
-        );
+      for (const key of ["start", "end"])
+        if (url.searchParams.has(key))
+          dateSchema.parse(url.searchParams.get(key));
+      if (url.searchParams.has("days"))
+        z.coerce
+          .number()
+          .int()
+          .min(1)
+          .max(3650)
+          .parse(url.searchParams.get("days"));
       if (
         (url.searchParams.get("start") ?? "") >
         (url.searchParams.get("end") ?? "9999")
@@ -183,10 +244,27 @@ async function handle(request: Request) {
           "invalid_window",
           "The start date must precede the end date.",
         );
+      if (url.searchParams.has("category"))
+        z.enum(categories).parse(url.searchParams.get("category"));
       result = await digest(owner, url.searchParams);
-    } else if (path === "announcements" && method === "GET")
-      result = { announcements: await getFilings() };
-    else if (path.startsWith("announcements/") && method === "GET") {
+    } else if (path === "announcements" && method === "GET") {
+      const filters: {
+        ticker?: string;
+        start?: string;
+        end?: string;
+        category?: string;
+        mode?: string;
+      } = {};
+      for (const key of ["ticker", "start", "end", "category", "mode"] as const)
+        if (url.searchParams.has(key))
+          filters[key] = url.searchParams.get(key)!;
+      if (filters.ticker) filters.ticker = normalizeTicker(filters.ticker);
+      if (filters.start) dateSchema.parse(filters.start);
+      if (filters.end) dateSchema.parse(filters.end);
+      if (filters.category) z.enum(categories).parse(filters.category);
+      if (filters.mode) z.enum(["historical", "live"]).parse(filters.mode);
+      result = { announcements: await getFilings(filters) };
+    } else if (path.startsWith("announcements/") && method === "GET") {
       const f = (await getFilings()).find((f) => f.id === path.slice(14));
       if (!f)
         throw new ApiError(
@@ -195,56 +273,110 @@ async function handle(request: Request) {
           "This filing is unavailable.",
         );
       result = await eventDetail(f, await getSettings(owner));
-    } else if (path === "alerts" && method === "GET")
+    } else if (path === "alerts" && method === "GET") {
+      const status = url.searchParams.get("status");
+      if (status) z.enum(["unread", "read", "dismissed"]).parse(status);
+      const rows = await all<{
+        id: string;
+        payload: string;
+        status: string;
+        read_at: string | null;
+        dismissed_at: string | null;
+        mode: string;
+        observed_at: string;
+        priority: number;
+        event_type: string;
+        triggered_at: string;
+      }>(
+        `SELECT * FROM alerts WHERE owner=? ${status ? "AND status=?" : ""} ORDER BY triggered_at DESC LIMIT 100`,
+        owner,
+        ...(status ? [status] : []),
+      );
       result = {
-        alerts: (
-          await all<{ payload: string }>(
-            "SELECT payload FROM alerts WHERE owner=? ORDER BY triggered_at DESC LIMIT 100",
-            owner,
-          )
-        ).map((a) => JSON.parse(a.payload)),
-        note: "Stored in-app EOD alerts, recalculated when opening a briefing.",
+        alerts: rows.map((r) => ({
+          ...JSON.parse(r.payload),
+          id: r.id,
+          status: r.status,
+          read_at: r.read_at,
+          dismissed_at: r.dismissed_at,
+          mode: r.mode,
+          observed_at: r.observed_at,
+          priority: r.priority,
+          event_type: r.event_type,
+          triggered_at: r.triggered_at,
+        })),
+        note: "Persisted in-app history. Threshold changes affect new evaluations; existing read and dismiss state is preserved.",
       };
+    } else if (path.startsWith("alerts/") && method === "PATCH") {
+      const { status } = z
+          .object({ status: z.enum(["unread", "read", "dismissed"]) })
+          .parse(parsedBody),
+        id = path.slice(7),
+        now = new Date().toISOString();
+      const updated = await run(
+        "UPDATE alerts SET status=?,read_at=CASE WHEN ?='read' THEN ? WHEN ?='unread' THEN NULL ELSE read_at END,dismissed_at=CASE WHEN ?='dismissed' THEN ? ELSE NULL END WHERE id=? AND owner=?",
+        status,
+        status,
+        now,
+        status,
+        status,
+        now,
+        id,
+        owner,
+      );
+      if (!updated.meta.changes)
+        throw new ApiError(
+          404,
+          "alert_not_found",
+          "Notification not found in this session.",
+        );
+      result = { id, status };
+    } else if (path === "alerts/evaluate" && method === "POST")
+      result = await evaluateAlerts(owner, mode);
     else if (path.startsWith("market/") && method === "GET")
       result = {
         ticker: normalizeTicker(path.slice(7)),
         points: await getPoints(normalizeTicker(path.slice(7)), mode),
         mode,
         source: "Yahoo Finance",
-        note: "Daily close; not an intraday quote. Price-change calculations use adjusted close.",
+        note: "Completed sessions only. Price-change calculations use adjusted close.",
       };
-    else if (path === "market/refresh" && method === "POST") {
-      const input = z
-        .object({ ticker: z.string().max(32) })
-        .parse(await body(request));
-      const ticker = normalizeTicker(input.ticker),
-        market = await yahooMarket(ticker);
-      await storeMarket(ticker, market);
+    else if (
+      (path === "market/refresh" || path === "admin/ingest-market") &&
+      method === "POST"
+    ) {
+      if (path.startsWith("admin/")) admin(request);
+      const input = tickerInput.parse(parsedBody),
+        ticker = normalizeTicker(input.ticker);
+      await resolveCompany(ticker);
+      const market = await trackSync("market", ticker, async () => {
+        const m = await yahooMarket(ticker);
+        const counts = await storeMarket(ticker, m);
+        return { ...m, discovered: m.points.length, ...counts };
+      });
+      await evaluateAlerts(owner, "live");
       result = {
         ticker,
         sessions: market.points.length,
         retrieved_at: market.retrieved_at,
-        note: "Completed sessions only. Today's potentially unfinished session is excluded.",
+        run_id: market.run_id,
+        note: "Completed sessions only; historical data remains separate.",
       };
     } else if (path === "companies/search" && method === "GET") {
-      const q = (url.searchParams.get("q") ?? "").trim().slice(0, 60);
-      const escaped = q.replace(/[\\%_]/g, "\\$&");
+      const q = z
+          .string()
+          .max(60)
+          .parse(url.searchParams.get("q") ?? "")
+          .trim(),
+        escaped = q.replace(/[\\%_]/g, "\\$&");
       const local = await all<Company>(
-        "SELECT * FROM companies WHERE ticker LIKE ? ESCAPE '\\' OR name LIKE ? ESCAPE '\\' ORDER BY name LIMIT 12",
-        `%${escaped}%`,
-        `%${escaped}%`,
+        "SELECT * FROM companies WHERE instr(lower(ticker),lower(?))>0 OR instr(lower(name),lower(?))>0 ORDER BY name LIMIT 12",
+        q,
+        q,
       );
       if (!local.length && q) {
-        try {
-          local.push((await resolveCompany(q)) as Company);
-        } catch (e) {
-          if (e instanceof ApiError) throw e;
-          throw new ApiError(
-            422,
-            "invalid_ticker",
-            "No matching company. Search by a valid NSE ticker.",
-          );
-        }
+        await budget("global:resolve", 60);
+        local.push((await resolveCompany(q)) as Company);
       }
       result = { companies: local };
     } else if (/^companies\/[^/]+\/overview$/.test(path) && method === "GET") {
@@ -253,7 +385,7 @@ async function handle(request: Request) {
       result = {
         company,
         metrics: await all<Metric>(
-          "SELECT * FROM financial_metrics WHERE ticker=?",
+          "SELECT * FROM financial_metrics WHERE ticker=? AND verification_status<>'unverified'",
           ticker,
         ),
         documents: await all<Omit<Document, "pages">>(
@@ -265,7 +397,7 @@ async function handle(request: Request) {
         mode,
       };
     } else if (path === "research" && method === "POST") {
-      const input = questionSchema.parse(await body(request)),
+      const input = questionSchema.parse(parsedBody),
         ticker = normalizeTicker(input.ticker);
       await resolveCompany(ticker);
       result = await research(ticker, input.question, {
@@ -286,77 +418,36 @@ async function handle(request: Request) {
         ),
       };
     else if (path.startsWith("documents/") && method === "GET") {
-      result = await getDocument(path.slice(10));
+      result = await getDocument(z.string().max(100).parse(path.slice(10)));
       if (!result)
         throw new ApiError(
           404,
           "document_not_found",
           "Source document is unavailable.",
         );
-    } else if (path === "admin/ingest-market" && method === "POST") {
-      admin(request);
-      const input = z
-        .object({ ticker: z.string().max(32) })
-        .parse(await body(request));
-      const ticker = normalizeTicker(input.ticker),
-        market = await yahooMarket(ticker);
-      await storeMarket(ticker, market);
-      result = { ticker, sessions: market.points.length };
     } else if (path === "admin/ingest-announcements" && method === "POST") {
       admin(request);
       const input = z
         .object({
           ticker: z.string().max(32),
-          document_id: z.string().max(100),
+          document_id: z.string().max(100).optional(),
+          url: z.string().url().optional(),
           headline: z.string().min(5).max(240),
-          date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+          date: dateSchema,
           evidence_page: z.number().int().positive(),
-          severity: z.number().min(0).max(40).default(10),
-          magnitude: z.number().min(0).max(25).default(0),
+          mode: z.enum(["historical", "live"]).default("live"),
+          reprocess: z.boolean().default(false),
         })
-        .parse(await body(request));
-      const ticker = normalizeTicker(input.ticker),
-        d = await getDocument(input.document_id);
-      if (
-        !d ||
-        d.ticker !== ticker ||
-        !d.pages.some((p) => p.page === input.evidence_page)
-      )
-        throw new ApiError(
-          422,
-          "invalid_evidence",
-          "Import the matching company document and supply an existing page first.",
-        );
-      const hash = await sha(`${d.hash}:${input.headline}`),
-        category = classify(input.headline);
-      const filing: Filing = {
+        .refine(
+          (v) => !!v.document_id || !!v.url,
+          "Supply document_id or primary PDF URL",
+        )
+        .parse(parsedBody);
+      result = await importFiling({
         ...input,
-        ticker,
-        id: hash.slice(0, 24),
-        date_precision: "Administrator-imported release date",
-        category: category.category,
-        summary: d.pages
-          .find((p) => p.page === input.evidence_page)!
-          .text.slice(0, 500),
-        why: category.rationale,
-        confidence: category.confidence,
-        novelty: 5,
-        evidence: 8,
-        questions: ["What changed in this filing?"],
-      };
-      await run(
-        "INSERT OR IGNORE INTO announcements(id,ticker,hash,document_id,date,payload) VALUES (?,?,?,?,?,?)",
-        filing.id,
-        ticker,
-        hash,
-        input.document_id,
-        input.date,
-        JSON.stringify(filing),
-      );
-      result = {
-        filing,
-        duplicate_detection: "Content hash with a unique database constraint",
-      };
+        ticker: normalizeTicker(input.ticker),
+      });
+      await evaluateAlerts(owner, input.mode);
     } else if (path === "admin/ingest-document" && method === "POST") {
       admin(request);
       const input = z
@@ -365,14 +456,37 @@ async function handle(request: Request) {
           url: z.string().url(),
           title: z.string().max(200),
         })
-        .parse(await body(request));
-      result = {
-        id: await ingestPdf(
-          normalizeTicker(input.ticker),
-          input.url,
-          input.title,
-        ),
-      };
+        .parse(parsedBody);
+      const ticker = normalizeTicker(input.ticker);
+      await resolveCompany(ticker);
+      result = { id: await ingestPdf(ticker, input.url, input.title) };
+    } else if (path === "admin/extract-document" && method === "POST") {
+      admin(request);
+      const input = z
+          .object({ document_id: z.string().max(100) })
+          .parse(parsedBody),
+        d = await getDocument(input.document_id);
+      if (!d)
+        throw new ApiError(404, "document_not_found", "Document not found.");
+      result = await extractDocument(d.ticker, d.id);
+    } else if (path === "admin/evaluate-alerts" && method === "POST") {
+      admin(request);
+      const input = z
+        .object({
+          refresh_market: z.boolean().default(false),
+          tickers: z.array(z.string().max(32)).max(30).optional(),
+        })
+        .parse(parsedBody);
+      result = await evaluateAll(
+        mode,
+        input.refresh_market,
+        input.tickers?.map(normalizeTicker),
+      );
+    } else if (path === "companies/refresh-documents" && method === "POST") {
+      const input = tickerInput.parse(parsedBody),
+        ticker = normalizeTicker(input.ticker);
+      await resolveCompany(ticker);
+      result = await discoverDocuments(ticker);
     } else
       throw new ApiError(
         404,
@@ -384,52 +498,42 @@ async function handle(request: Request) {
       "Cache-Control": "private, no-store",
       "X-Content-Type-Options": "nosniff",
     });
-    if (owner.startsWith("device:"))
-      headers.set(
-        "Set-Cookie",
-        `finn_session=${owner.slice(7)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000${url.protocol === "https:" ? "; Secure" : ""}`,
-      );
+    headers.set(
+      "Set-Cookie",
+      `finn_session=${owner.slice(7)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000${url.protocol === "https:" ? "; Secure" : ""}`,
+    );
     return new Response(JSON.stringify(result), { headers });
   } catch (e) {
-    if (e instanceof Error && e.message.startsWith("Enter a valid NSE ticker"))
-      return Response.json(
-        { error: { code: "invalid_ticker", message: e.message } },
-        { status: 422 },
-      );
-    if (e instanceof z.ZodError)
-      return Response.json(
-        {
-          error: {
-            code: "validation_error",
-            message: e.issues
-              .map((i) => `${i.path.join(".")}: ${i.message}`)
-              .join("; "),
-          },
-        },
-        { status: 422 },
-      );
-    if (e instanceof ApiError)
-      return Response.json(
-        { error: { code: e.code, message: e.message } },
-        { status: e.status },
-      );
-    console.error(
-      "FINN API failure",
-      e instanceof Error ? e.message : "unknown",
-    );
+    let status = 503,
+      code = "service_unavailable",
+      message =
+        "FINN could not complete this request. The source or database may be temporarily unavailable. Please retry.";
+    if (e instanceof z.ZodError) {
+      status = 422;
+      code = "validation_error";
+      message = e.issues
+        .map((i) => `${i.path.join(".")}: ${i.message}`)
+        .join("; ");
+    } else if (e instanceof ApiError) {
+      status = e.status;
+      code = e.code;
+      message = e.message;
+    } else if (
+      e instanceof Error &&
+      e.message.startsWith("Enter a valid NSE ticker")
+    ) {
+      status = 422;
+      code = "invalid_ticker";
+      message = e.message;
+    } else console.error("FINN API failure", "internal_failure");
     return Response.json(
-      {
-        error: {
-          code: "service_unavailable",
-          message:
-            "FINN could not complete this request. The source or database may be temporarily unavailable. Please retry.",
-        },
-      },
-      { status: 503 },
+      { error: { code, message } },
+      { status, headers: { "Cache-Control": "no-store" } },
     );
   }
 }
 export const GET = handle;
 export const POST = handle;
 export const PUT = handle;
+export const PATCH = handle;
 export const DELETE = handle;

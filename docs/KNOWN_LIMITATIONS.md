@@ -1,0 +1,13 @@
+# Known limitations and deliberate exclusions
+
+- Exchange-wide completeness is not claimed. Primary-document discovery depends on publicly retrievable company/exchange PDFs and a link directory. Restricted or failed sources remain visible in the sync ledger. A successful document import is not a complete corporate-announcement feed.
+- No cloud schedule, phone notification or browser push subscription has been activated. Protected batch jobs and durable in-app notifications function locally. Deployment and GitHub pushes await user review.
+- Historical replay is the original March–April 2025 market window. Later imported historical filings use their actual dates and custom windows. Current prices are retrieved completed EOD sessions, not intraday quotes.
+- Interactive PDFs are bounded to 8 MB/500 pages. Scanned documents need a separate OCR workflow. Large seed annual reports explicitly use partial selected pages. Ordinary permitted redirects are supported; access controls are never bypassed.
+- Gemini requires a real server-side key and a supported configured model. Quotas can interrupt processing. Provider-generated facts/claims can be rejected even when JSON is valid. Retrieval/extractive fallback is labelled honestly.
+- Automated source checks are conservative heuristics, not complete semantic entailment or an audit opinion. AI-extracted table facts remain source-checked rather than human-reviewed. Ambiguous periods or definitions require review.
+- The explicit prose extractor supports clear INR-crore quarterly/annual statements and a limited grammar of quantified guidance. Nine/six-month periods are not silently treated as full years. Arbitrary financial table layouts are not guaranteed; absent PBT/EBITDA are not fabricated.
+- Guidance matching is intentionally exact on metric/unit/basis/period. This can miss synonymous definitions rather than risk comparing incompatible figures. No automated currency conversion, unit conversion or approximate-target pass/fail inference is performed.
+- Full multi-year coverage, semantic embeddings/reranking, automated biographies, universal table/OCR extraction, and exchange-wide polling remain outside this small prototype. Research indicates evidence gaps for unsupported sections.
+- Anonymous device cookies isolate sessions without login; they are not a multi-device authenticated account or authorization for confidential investor data. The application stores only public company evidence and local visitor preferences.
+- SQLite/D1 remains the supported runtime. A different host would need a durable compatible adapter; ephemeral serverless filesystem storage is unsuitable.
