@@ -1,10 +1,20 @@
 import { env } from "cloudflare:workers";
-import { all, one, run, budget, lock, unlock, sha } from "../../db/repository";
+import {
+  all,
+  one,
+  run,
+  budget,
+  lock,
+  unlock,
+  sha,
+  ApiError,
+} from "../../db/repository";
 import {
   aiStatus,
   geminiTransport,
   PROMPT_VERSION,
   AiFailure,
+  modelForTask,
   type AiConfig,
 } from "./gemini";
 import {
@@ -13,7 +23,11 @@ import {
   classifyAnnouncement,
   type Source,
 } from "./provider";
-import { extractReportedProse } from "../financial-extraction";
+import {
+  extractReportedProse,
+  extractExplicitTables,
+  extractionPassages,
+} from "../financial-extraction";
 import type { Metric } from "../domain";
 
 export const config = () => env as unknown as AiConfig;
@@ -25,11 +39,15 @@ export async function aiTask<T>(
   execute: (model: string) => Promise<T>,
 ): Promise<T> {
   const c = config(),
-    model = c.GEMINI_MODEL_FAST;
+    model = modelForTask(c, task, (data as { question?: string })?.question);
   if (!providerStatus().enabled || !model)
     throw new AiFailure("not_configured");
   const key = await sha(
     JSON.stringify({ task, ticker, data, model, prompt: PROMPT_VERSION }),
+  );
+  await run(
+    "DELETE FROM analysis_cache WHERE key IN (SELECT key FROM analysis_cache WHERE expires_at<? LIMIT 40)",
+    new Date().toISOString(),
   );
   const cached = await one<{ payload: string }>(
     "SELECT payload FROM analysis_cache WHERE key=? AND expires_at>?",
@@ -93,7 +111,9 @@ export async function aiTask<T>(
     return result;
   } catch (e) {
     const code =
-      e instanceof AiFailure ? e.code : "validation_or_budget_failed";
+      e instanceof AiFailure || e instanceof ApiError
+        ? e.code
+        : "validation_failed";
     await run(
       "INSERT INTO ai_operations(id,ticker,task,model,status,created_at,duration_ms,error_code) VALUES (?,?,?,?,?,?,?,?)",
       id,
@@ -119,9 +139,13 @@ export async function synthesizeResearch(
   calculated: string[],
 ) {
   const input = { ticker, question, sources, metrics, calculated };
-  return aiTask("research", ticker, input, (model) =>
+  const result = await aiTask("research", ticker, input, (model) =>
     analyzeCompanyResearch(geminiTransport(config()), model, input),
   );
+  return {
+    ...result,
+    model_used: modelForTask(config(), "research", question)!,
+  };
 }
 export async function extractDocument(ticker: string, documentId: string) {
   const chunks = await all<Source>(
@@ -143,9 +167,23 @@ export async function extractDocument(ticker: string, documentId: string) {
   const prose = extractReportedProse(
     [...pageMap].map(([page, text]) => ({ page, text })),
   );
+  const table = extractExplicitTables(
+    [...pageMap].map(([page, text]) => ({ page, text })),
+  );
+  prose.metrics.push(...table.metrics);
+  for (const r of table.rejected)
+    await run(
+      "INSERT INTO extraction_audit(id,document_id,method,status,reason,created_at) VALUES (?,?,?,?,?,?)",
+      crypto.randomUUID(),
+      documentId,
+      "explicit_table_v1",
+      "rejected",
+      `Page ${r.page}: ${r.reason}`,
+      new Date().toISOString(),
+    );
   const nowProse = new Date().toISOString();
   await run(
-    "UPDATE financial_metrics SET verification_status='unverified' WHERE document_id=? AND extraction_method='explicit_prose_v1'",
+    "UPDATE financial_metrics SET verification_status='unverified' WHERE document_id=? AND extraction_method IN ('explicit_prose_v1','explicit_table_v1')",
     documentId,
   );
   for (const m of prose.metrics) {
@@ -153,7 +191,7 @@ export async function extractDocument(ticker: string, documentId: string) {
       `${ticker}:${m.name}:${m.period}:${m.basis}:${documentId}`,
     );
     await run(
-      `INSERT INTO financial_metrics(id,ticker,name,value,period,unit,basis,document_id,page,evidence_text,extraction_method,verification_status,updated_at,currency,scale,fiscal_year,fiscal_quarter) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value,evidence_text=excluded.evidence_text,page=excluded.page,updated_at=excluded.updated_at,verification_status=excluded.verification_status WHERE financial_metrics.extraction_method='explicit_prose_v1'`,
+      `INSERT INTO financial_metrics(id,ticker,name,value,period,unit,basis,document_id,page,evidence_text,extraction_method,verification_status,updated_at,currency,scale,fiscal_year,fiscal_quarter) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value,evidence_text=excluded.evidence_text,page=excluded.page,updated_at=excluded.updated_at,verification_status=excluded.verification_status WHERE financial_metrics.extraction_method IN ('explicit_prose_v1','explicit_table_v1')`,
       id,
       ticker,
       m.name,
@@ -164,14 +202,20 @@ export async function extractDocument(ticker: string, documentId: string) {
       documentId,
       m.page,
       m.evidence_text,
-      "explicit_prose_v1",
+      m.extraction_method ?? "explicit_prose_v1",
       "source_checked",
       nowProse,
       m.unit === "%" ? null : "INR",
-      m.unit === "%" ? null : "crore",
+      m.unit === "%" ? null : m.unit.replace(/^INR /, ""),
       Number(m.period.match(/FY(\d{4})/)![1]),
       Number(m.period.match(/^Q([1-4])/)?.[1]) || null,
     );
+    if (m.reporting_status)
+      await run(
+        "UPDATE financial_metrics SET reporting_status=? WHERE id=?",
+        m.reporting_status,
+        id,
+      );
   }
   for (const g of prose.guidance) {
     const id = await sha(
@@ -183,11 +227,12 @@ export async function extractDocument(ticker: string, documentId: string) {
       );
     const previous = d?.published_at
       ? await one<{ id: string }>(
-          "SELECT id FROM guidance_statements WHERE ticker=? AND metric=? AND target_period=? AND basis=? AND stated_at<? ORDER BY stated_at DESC LIMIT 1",
+          "SELECT id FROM guidance_statements WHERE ticker=? AND metric=? AND target_period=? AND basis=? AND unit=? AND stated_at<? ORDER BY stated_at DESC LIMIT 1",
           ticker,
           g.metric,
           g.period,
           g.basis,
+          g.unit,
           d.published_at,
         )
       : null;
@@ -219,14 +264,14 @@ export async function extractDocument(ticker: string, documentId: string) {
       status: "offline_explicit_prose",
     };
   // Bounded financial/guidance passages, not an unbounded annual report request.
-  const sources = chunks
-    .filter((s) =>
-      /consolidated|cash flow|guidance|outlook|revenue.*operations|financial results/i.test(
-        s.text,
-      ),
-    )
-    .slice(0, 16)
-    .map((s) => ({ ...s, text: s.text.slice(0, 2400) }));
+  const documentMeta = await one<{ type: string }>(
+    "SELECT type FROM documents WHERE id=?",
+    documentId,
+  );
+  const sources = extractionPassages(
+    chunks,
+    documentMeta?.type ?? "results",
+  ).map((s) => ({ ...s, text: s.text.slice(0, 2400) }));
   if (!sources.length)
     return { metrics: 0, guidance: 0, status: "no_relevant_text" };
   let result;
@@ -240,6 +285,15 @@ export async function extractDocument(ticker: string, documentId: string) {
       ),
     );
   } catch (e) {
+    await run(
+      "INSERT INTO extraction_audit(id,document_id,method,status,reason,created_at) VALUES (?,?,?,?,?,?)",
+      crypto.randomUUID(),
+      documentId,
+      "gemini",
+      "rejected",
+      e instanceof AiFailure ? e.code : "validation_failed",
+      new Date().toISOString(),
+    );
     return {
       metrics: prose.metrics.length,
       guidance: prose.guidance.length,
@@ -248,6 +302,16 @@ export async function extractDocument(ticker: string, documentId: string) {
     };
   }
   const now = new Date().toISOString();
+  if (result.rejected)
+    await run(
+      "INSERT INTO extraction_audit(id,document_id,method,status,reason,created_at) VALUES (?,?,?,?,?,?)",
+      crypto.randomUUID(),
+      documentId,
+      "gemini",
+      "rejected",
+      `${result.rejected} candidate rows failed source/period validation.`,
+      now,
+    );
   for (const m of result.metrics) {
     const source = sources.find((s) => s.id === m.source_id)!;
     const id = await sha(
@@ -284,11 +348,12 @@ export async function extractDocument(ticker: string, documentId: string) {
       `${ticker}:${g.metric}:${g.target_period}:${g.basis}:${documentId}:${source.page}`,
     );
     const previous = await one<{ id: string }>(
-      `SELECT id FROM guidance_statements WHERE ticker=? AND metric=? AND target_period=? AND basis=? AND stated_at<? ORDER BY stated_at DESC LIMIT 1`,
+      `SELECT id FROM guidance_statements WHERE ticker=? AND metric=? AND target_period=? AND basis=? AND unit=? AND stated_at<? ORDER BY stated_at DESC LIMIT 1`,
       ticker,
       g.metric,
       g.target_period,
       g.basis,
+      g.unit,
       g.stated_at ?? now,
     );
     await run(

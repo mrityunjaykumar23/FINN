@@ -68,6 +68,13 @@ export type Filing = {
   novelty: number;
   evidence: number;
   questions: string[];
+  event_signature?: string;
+  exchange_filing_id?: string;
+  event_quote?: string;
+  event_scope?: "explicit" | "page_category";
+  canonical_event_id?: string;
+  materiality_attributes?: import("./event-analysis.ts").EventAttributes;
+  materiality_reasons?: string[];
 };
 export type Metric = {
   id: string;
@@ -86,6 +93,9 @@ export type Metric = {
   scale?: string | null;
   fiscal_year?: number | null;
   fiscal_quarter?: number | null;
+  reporting_status?: string;
+  updated_at?: string;
+  published_at?: string | null;
 };
 export type Guidance = {
   ticker: string;
@@ -106,6 +116,7 @@ export type Guidance = {
   unit?: string;
   guidance_type?: string;
   revised?: boolean;
+  superseded?: boolean;
 };
 export function percentChange(current: number | null, base: number | null) {
   if (
@@ -233,7 +244,10 @@ export function classify(text: string): {
     ],
     ["dividend", /dividend/i],
     ["bonus_split", /bonus issue|stock split|split of shares/i],
-    ["capex", /capacity expansion|new plant|capital expenditure|new facility/i],
+    [
+      "capex",
+      /capacity expansion|new plant|capital expenditure|new facility|commercial operation|declared commercial|commissioning/i,
+    ],
     ["postal_ballot", /postal ballot/i],
     ["agm_egm", /annual general meeting|extraordinary general meeting/i],
     ["pledging", /pledg/i],
@@ -298,6 +312,13 @@ export function inWindow(date: string, start: string, end: string) {
   );
 }
 export function compareGuidance(g: Guidance) {
+  if (g.guidance_type === "approximate")
+    return {
+      status: "Approximate target — review evidence",
+      variance: null,
+      explanation:
+        "Approximate wording does not establish an exact pass/fail boundary. Inspect both sources and qualifiers.",
+    };
   if (
     g.period !== g.actual_period ||
     g.basis !== g.actual_basis ||
@@ -343,6 +364,14 @@ export function normalizeTicker(raw: string) {
   return /\.(NS|BO)$/.test(t) ? t : `${t}.NS`;
 }
 const synonyms: Record<string, string[]> = {
+  pat: ["pat", "net profit", "profit after tax"],
+  pbt: ["pbt", "profit before tax"],
+  cfo: ["cfo", "cash from operations", "operating cash flow"],
+  fcf: ["fcf", "free cash flow"],
+  capex: ["capex", "capital expenditure", "purchase of property"],
+  ebitda: ["ebitda", "operating profitability"],
+  qoq: ["qoq", "quarter over quarter", "sequential"],
+  yoy: ["yoy", "year over year"],
   cash: ["cash", "flow", "conversion", "operations", "capital", "expenditure"],
   guidance: ["guidance", "outlook", "expect", "growth", "margin"],
   risk: [
@@ -357,6 +386,27 @@ const synonyms: Record<string, string[]> = {
   revenue: ["revenue", "revenues", "growth", "sales", "segments"],
   margin: ["margin", "profit", "ebit", "ebitda", "profitability"],
 };
+export function retrievalTerms(question: string) {
+  const words = question.toLowerCase().match(/[a-z0-9]+/g) ?? [];
+  const filtered = words.filter(
+    (w) =>
+      w.length > 2 &&
+      ![
+        "the",
+        "what",
+        "how",
+        "has",
+        "was",
+        "were",
+        "does",
+        "and",
+        "for",
+        "company",
+        "its",
+      ].includes(w),
+  );
+  return [...new Set(filtered.flatMap((w) => synonyms[w] ?? [w]))];
+}
 export function retrieve<
   T extends { ticker: string; text: string; period?: string; type?: string },
 >(
@@ -386,7 +436,7 @@ export function retrieve<
           "its",
         ].includes(w),
     );
-  const terms = [...new Set(query.flatMap((w) => synonyms[w] ?? [w]))];
+  const terms = retrievalTerms(question);
   return items
     .filter(
       (x) =>
@@ -401,8 +451,16 @@ export function retrieve<
           s +
           Math.min(
             5,
-            (x.text.toLowerCase().match(new RegExp(`\\b${t}\\b`, "g")) ?? [])
-              .length,
+            (
+              x.text
+                .toLowerCase()
+                .match(
+                  new RegExp(
+                    `\\b${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`,
+                    "g",
+                  ),
+                ) ?? []
+            ).length,
           ),
         0,
       ),

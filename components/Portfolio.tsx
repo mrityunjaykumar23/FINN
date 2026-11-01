@@ -49,11 +49,14 @@ export function CompanySearch({
       () => {
         setLoading(true);
         setError("");
-        api<{ companies: Company[] }>(
+        api<{ companies: Company[]; limitation?: string }>(
           `companies/search?q=${encodeURIComponent(query)}`,
           { signal: abort.signal },
         )
-          .then((r) => setResults(r.companies))
+          .then((r) => {
+            setResults(r.companies);
+            if (r.limitation) setError(r.limitation);
+          })
           .catch((e) => {
             if (e.name !== "AbortError") {
               setResults([]);
@@ -133,7 +136,8 @@ export function CompanySearch({
                 >
                   <strong>{c.name}</strong>
                   <span>
-                    {c.ticker} · {c.sector}
+                    {c.ticker} · {c.exchange ?? "NSE"} ·{" "}
+                    {c.indexed_documents ?? 0} indexed documents
                   </span>
                 </button>
                 {intent === "portfolio" ? (

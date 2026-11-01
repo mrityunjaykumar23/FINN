@@ -103,6 +103,18 @@ function fixture() {
       "utf8",
     ),
   );
+  db.exec(
+    readFileSync(
+      new URL("../drizzle/0004_flimsy_deathbird.sql", import.meta.url),
+      "utf8",
+    ),
+  );
+  db.exec(
+    readFileSync(
+      new URL("../drizzle/0005_parallel_outlaw_kid.sql", import.meta.url),
+      "utf8",
+    ),
+  );
   return db;
 }
 test("incremental migration works on empty database with enforced foreign keys", () => {
@@ -114,6 +126,18 @@ test("incremental migration works on empty database with enforced foreign keys",
   db.exec(
     readFileSync(
       new URL("../drizzle/0003_bumpy_marten_broadcloak.sql", import.meta.url),
+      "utf8",
+    ),
+  );
+  db.exec(
+    readFileSync(
+      new URL("../drizzle/0004_flimsy_deathbird.sql", import.meta.url),
+      "utf8",
+    ),
+  );
+  db.exec(
+    readFileSync(
+      new URL("../drizzle/0005_parallel_outlaw_kid.sql", import.meta.url),
       "utf8",
     ),
   );
@@ -335,7 +359,10 @@ test("guidance, metrics, caches and notification lifecycle survive database reop
     seed.documents.reduce((n, d) => n + d.pages.length, 0),
   );
   db.close();
-  assert.ok(folder.startsWith(join(tmpdir(), "finn-durable-")), "Cleanup must remain inside the test temporary directory");
+  assert.ok(
+    folder.startsWith(join(tmpdir(), "finn-durable-")),
+    "Cleanup must remain inside the test temporary directory",
+  );
   rmSync(folder, { recursive: true });
 });
 test("malformed JSON and invalid price observations fail constraints", () => {

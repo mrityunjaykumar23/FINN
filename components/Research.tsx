@@ -204,6 +204,30 @@ export function ResearchView({
       setBusy(false);
     }
   }
+  async function refreshSources() {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api<{ limitations: string[]; status?: string }>(
+        "companies/refresh-documents",
+        { method: "POST", body: JSON.stringify({ ticker }) },
+      );
+      setOverview(
+        await api<Overview>(
+          `companies/${encodeURIComponent(ticker)}/overview?mode=${mode}`,
+        ),
+      );
+      notify(
+        result.limitations.length
+          ? result.limitations.join(" ")
+          : "Primary source library checked. Inspect indexing coverage below.",
+      );
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
   const exists = companies.some((c) => c.ticker === ticker);
   const suggestions = [
     "How has revenue growth changed?",
@@ -610,6 +634,14 @@ export function ResearchView({
                 <div className="document-library">
                   <div className="section-heading">
                     <h3>Source library</h3>
+                    <button
+                      className="small-button"
+                      disabled={busy || asking}
+                      onClick={refreshSources}
+                    >
+                      <RefreshCw size={13} />{" "}
+                      {busy ? "Checking…" : "Refresh sources"}
+                    </button>
                     <span className="count-pill">
                       {overview.documents.length}
                     </span>

@@ -19,6 +19,8 @@ type Status = {
     error: string | null;
   }[];
   coverage_note: string;
+  monitored_companies?: number;
+  indexing?: { ticker: string; status: string; documents: number }[];
 };
 export function SystemStatus({ compact = false }: { compact?: boolean }) {
   const [status, setStatus] = useState<Status | null>(null),
@@ -45,11 +47,21 @@ export function SystemStatus({ compact = false }: { compact?: boolean }) {
               : "Research uses stored primary evidence and deterministic calculations. Add the server-side Gemini key to enable synthesis."}
           </p>
           <p>
+            {status.monitored_companies} monitored companies ·{" "}
             {status.counts.companies} supported companies ·{" "}
             {status.counts.documents} documents · {status.counts.metrics} metric
             records
           </p>
           <p>{status.coverage_note}</p>
+          {status.indexing?.some((s) => s.status !== "indexed") && (
+            <p>
+              Source candidates pending or unavailable:{" "}
+              {status.indexing
+                .filter((s) => s.status !== "indexed")
+                .reduce((a, s) => a + s.documents, 0)}
+              . Document coverage is incomplete.
+            </p>
+          )}
           {status.sync.length ? (
             <ul>
               {status.sync.slice(0, 8).map((s) => (

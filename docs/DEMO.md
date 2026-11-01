@@ -13,3 +13,19 @@ This upgrade has not been pushed or deployed. Run `npm run db:migrate:local`, co
 9. **Unsupported request:** ask for FY2099 or an unrelated topic; FINN reports insufficient evidence. The system status distinguishes source failures from no filings.
 
 Source examples are authentic links, not simulated disclosures. They require upstream availability. The imported local data and `.dev.vars` are deliberately excluded from Git; commands reproduce ingestion without company-specific source changes or prompts.
+
+## Final reliability walkthrough
+
+1. Open localhost:5173 and retain historical replay for the original 18-company experience. Inspect HCL financial evidence, periods, units and source-page links. In a custom 17 April 2025 window, Infosys results and its separate proposed-dividend event share the original PDF page without sharing an event ID.
+2. For a new genuine PUSH source, run `npm run job:local -- sync-announcements` with optional input `{ "tickers": ["NTPC.NS"] }`. Select live mode and a custom 29-30 October 2026 window. Inspect NTPC capacity commissioning, priority reasons, primary PDF and stored notification. Source status distinguishes the successful dated table check from unavailable providers.
+3. Reproducible protected imports: `docs/examples/ntpc-capacity.json`, `ntpc-acquisition.json`, `ntpc-credit-rating.json`, `ntpc-routine.json`, and `infy-dividend.json`. Use `npm run job:local -- filing <path>`. These are authentic originals with independently checked publication dates; they are not synthetic seed history.
+4. Search **Britannia Industries**. Research works without following it. Ask: "For Q1 FY2027, what net sales, operating profit, PBT and PAT growth did management report? Retain the source qualifiers and do not calculate missing values." Choose transcript and Q1 FY2027. Inspect the actual model state and original BSE transcript page 7. Financial snapshots retain separate units/bases; EBITDA is not manufactured from operating profit.
+5. Ask HCL's FY2026 guidance question. Forward guidance uses its target year while source metadata retains FY2025. In Promises, inspect original/revised FY2025 targets against the 4.7% actual, both source pages and superseded labels.
+6. Refresh sources using the library button. Pending, inaccessible or oversized candidates stay visible in status, rather than becoming a false "no information" conclusion.
+7. On mobile, test name search, add/remove (then restore the original portfolio), financial evidence, charts, guidance filter and notification read/unread/dismiss. Preferences survive refresh and restart.
+
+For a legitimately downloaded original PDF, create a local manifest `{ "file":"C:/path/original.pdf", "ticker":"NTPC.NS", "url":"https://ntpc.co.in/sites/default/files/announcement/2026/2026-02/20260217_STEX_CREDITRATING.pdf", "title":"Original disclosure", "type":"announcement" }`, substituting the real original URL, then run `node scripts/import-local-pdf.mjs manifest.json`. The file is hashed, extracted locally and uploaded in authenticated small batches. Re-running resumes idempotently. Scanned pages remain partial; OCR is not claimed. Credentials are read privately from existing `.dev.vars`.
+
+The long-document/pagination regressions use explicitly labelled isolated fixtures, not fictional data in the investor application. `npm run test:cache` must target a **fresh isolated localhost test database** through `FINN_CACHE_TEST_URL`; it refuses to clear an existing guidance library.
+
+For portfolios/owners larger than one batch, finish each company batch's owner evaluation before advancing companies: retain `next_company_cursor`, drain `alerts.next_owner_cursor` using `tickers: []` plus `owner_after`, then run the next company batch with `after` and a reset owner cursor. This keeps earlier owners eligible for filings found in later company batches. Scheduling is deferred; an eventual scheduler must consume these continuations.

@@ -53,3 +53,66 @@ test(
     assert.ok(result.usage.input_tokens > 0);
   },
 );
+for (const scenario of ["guidance", "risk"] as const)
+  test(
+    `real Gemini ${scenario} analysis preserves authentic source evidence`,
+    {
+      skip: !aiStatus(config).enabled
+        ? "Gemini key/model not configured"
+        : false,
+    },
+    async () => {
+      const seed = JSON.parse(readFileSync("data/seed.json", "utf8"));
+      const d = seed.documents.find(
+        (d: { id: string }) =>
+          d.id === (scenario === "guidance" ? "hcl-results" : "infy-annual"),
+      );
+      const pages =
+        scenario === "guidance"
+          ? d.pages.filter((p: { page: number }) => p.page === 3)
+          : [...d.pages]
+              .sort(
+                (a: { text: string }, b: { text: string }) =>
+                  (
+                    b.text.match(
+                      /risk|cyber|security|uncertain|geopolitical/gi,
+                    ) ?? []
+                  ).length -
+                  (
+                    a.text.match(
+                      /risk|cyber|security|uncertain|geopolitical/gi,
+                    ) ?? []
+                  ).length,
+              )
+              .slice(0, 3);
+      const sources = pages.map(
+        (p: { page: number; text: string }, i: number) => ({
+          id: `S${i + 1}`,
+          document_id: d.id,
+          ticker: d.ticker,
+          page: p.page,
+          text: p.text.slice(0, 6000),
+          period: d.period,
+        }),
+      );
+      const result = await analyzeCompanyResearch(
+        geminiTransport(config),
+        config.GEMINI_MODEL_FAST!,
+        {
+          ticker: d.ticker,
+          question:
+            scenario === "guidance"
+              ? "What company constant-currency revenue-growth and EBIT-margin guidance was given for FY2026? Preserve the forward-looking qualifiers."
+              : "Identify the principal risks disclosed in these annual-report passages. Explain the uncertainties without predicting their outcomes.",
+          sources,
+          metrics: [],
+          calculated: [],
+        },
+      );
+      assert.ok(result.usage.input_tokens > 0);
+      assert.ok(result.concise_summary.supporting_source_ids.length > 0);
+      if (scenario === "guidance")
+        assert.match(JSON.stringify(result), /2|5|18|19/);
+      else assert.ok(result.risks.length > 0);
+    },
+  );

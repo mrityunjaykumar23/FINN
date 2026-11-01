@@ -17,6 +17,9 @@ export type Company = {
   relative_volume: number | null;
   date: string | null;
   events: number;
+  in_portfolio?: number;
+  indexed_documents?: number;
+  exchange?: string;
   points?: Point[];
 };
 export type RankedFiling = Filing & {
@@ -77,6 +80,7 @@ export type ResearchFinding = {
   verification?: string;
 };
 export type GuidanceResult = Guidance & {
+  stated_at?: string | null;
   status: string;
   variance: number | null;
   explanation: string;

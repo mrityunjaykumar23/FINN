@@ -15,7 +15,8 @@ const action = process.argv[2] ?? "evaluate",
     : {};
 const paths = {
   evaluate: "admin/evaluate-alerts?mode=live",
-  sync: "admin/evaluate-alerts?mode=live",
+  sync: "admin/sync-intelligence",
+  "sync-announcements": "admin/sync-announcements",
   replay: "admin/evaluate-alerts?mode=historical",
   filing: "admin/ingest-announcements",
   market: "admin/ingest-market",
@@ -35,7 +36,7 @@ const response = await fetch(`http://127.0.0.1:5173/api/${paths[action]}`, {
     "Content-Type": "application/json",
   },
   body: JSON.stringify(
-    action === "sync" ? { ...input, refresh_market: true } : input,
+    input,
   ),
 });
 console.log(

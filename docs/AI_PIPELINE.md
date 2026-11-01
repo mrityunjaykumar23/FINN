@@ -2,7 +2,7 @@
 
 ## Provider and actual testing
 
-The primary provider is native Google Gemini through `@google/genai` 2.32.0, using `models.generateContent` and JSON-schema constrained responses. The configurable fast model handles classification, extraction and synthesis. Real local testing used `gemini-3.5-flash-lite`. `GEMINI_MODEL_REASONING` is reserved; this prototype does not automatically switch to a more expensive model.
+The primary provider is native Google Gemini through `@google/genai` 2.32.0, using `models.generateContent` and JSON-schema constrained responses. The configurable fast model handles classification/extraction and simple synthesis. Optional reasoning routing handles complex research, guidance, cash quality and risks. Real local testing used `gemini-3.5-flash-lite`. `GEMINI_MODEL_REASONING` falls back to the fast model if absent; the local tested configuration uses the same economical model for both.
 
 Official availability, structured output, SDK HTTP options and pricing were checked on 31 October 2026: [models](https://ai.google.dev/gemini-api/docs/models), [structured output](https://ai.google.dev/gemini-api/docs/structured-output), [pricing](https://ai.google.dev/gemini-api/docs/pricing), [SDK HTTP options](https://googleapis.github.io/js-genai/release_docs/interfaces/types.HttpOptions.html). Quotas are project-dependent; FINN does not claim a guaranteed free allowance or fabricate dollar cost telemetry.
 
@@ -32,3 +32,11 @@ Arithmetic belongs to TypeScript: adjusted daily price change, relative volume a
 - Source/model/prompt/metric-versioned research cache; separate structured extraction cache, expiring results and shared in-flight task locks.
 
 Missing key/disabled AI, timeout, provider rejection, schema failure, unsupported claims, input limit and rate limit all have explicit states. Deterministic findings and primary excerpts remain available. Provider error bodies, credentials and URLs containing secrets are never logged. `/api/status` exposes safe aggregate usage/configuration, not key values.
+
+## Final evidence and caching changes
+
+Prompt/validation version is `finn-evidence-v4`; retrieval version is `sql-fts-v3`. Company revision counters include indexed chunks, accepted metrics, guidance statements/revisions and deterministic comparison inputs. Model, question and filters also enter the key. Repeated no-op seed annotations and unchanged derivations do not churn the cache after restart. Expired task-cache entries are pruned in bounded batches.
+
+Validation now rejects directional contradictions, unsupported completed/proposed claims and relabelling operating profit as EBITDA. Older unsupported Gemini EBITDA rows are preserved as unverified with an extraction-audit entry. An exact metric value and a valid source ID are insufficient to establish its accounting definition. Ambiguous delimited-table columns are rejected rather than guessed. Task failures expose safe codes including `request_budget` and `timeout`, with deterministic/source fallback.
+
+Actual local provider acceptance includes existing Infosys, HCL forward guidance, annual-report risk analysis and newly discovered Britannia. A real HCL import invalidated a cached research answer, while unrelated Infosys ingestion left it reusable. A rejected broad Britannia synthesis and an exhausted hourly application budget both produced honest fallback; neither was counted as successful Gemini synthesis. See [VERIFICATION.md](VERIFICATION.md).

@@ -124,6 +124,8 @@ export const announcements = sqliteTable(
     document_id: text("document_id").notNull(),
     date: text("date").notNull(),
     payload: text("payload").notNull(),
+    event_signature: text("event_signature"),
+    exchange_filing_id: text("exchange_filing_id"),
     headline: text("headline")
       .notNull()
       .default(sql`''`),
@@ -178,6 +180,12 @@ export const announcements = sqliteTable(
     ),
     index("announcements_ticker_date").on(t.ticker, t.published_at),
     uniqueIndex("announcements_hash_unique").on(t.hash),
+    uniqueIndex("announcements_event_identity").on(
+      t.ticker,
+      t.document_id,
+      t.event_signature,
+    ),
+    index("announcements_page_order").on(t.date, t.id),
   ],
 );
 export const metrics = sqliteTable(
@@ -201,6 +209,9 @@ export const metrics = sqliteTable(
     value_type: text("value_type")
       .notNull()
       .default(sql`'reported'`),
+    reporting_status: text("reporting_status")
+      .notNull()
+      .default(sql`'reported'`),
     calculation_method: text("calculation_method"),
     evidence_text: text("evidence_text")
       .notNull()
@@ -221,6 +232,13 @@ export const metrics = sqliteTable(
       foreignColumns: [documents.id, documents.ticker],
     }).onDelete("restrict"),
     index("metrics_comparable").on(t.ticker, t.name, t.period, t.basis),
+    index("metrics_guidance_actual").on(
+      t.ticker,
+      t.name,
+      t.period,
+      t.basis,
+      t.unit,
+    ),
   ],
 );
 export const alerts = sqliteTable(
@@ -389,8 +407,51 @@ export const sourceSync = sqliteTable(
     next_retry: text("next_retry"),
     status: text("status").notNull(),
     error: text("error"),
+    cursor: text("cursor"),
+    discovered: integer("discovered").notNull().default(0),
+    inserted: integer("inserted").notNull().default(0),
+    duplicates: integer("duplicates").notNull().default(0),
   },
   (t) => [primaryKey({ columns: [t.provider, t.ticker] })],
+);
+export const companyVersions = sqliteTable("company_versions", {
+  ticker: text("ticker")
+    .primaryKey()
+    .references(() => companies.ticker),
+  revision: integer("revision").notNull().default(0),
+});
+export const extractionAudit = sqliteTable("extraction_audit", {
+  id: text("id").primaryKey(),
+  document_id: text("document_id")
+    .notNull()
+    .references(() => documents.id),
+  method: text("method").notNull(),
+  status: text("status").notNull(),
+  reason: text("reason").notNull(),
+  created_at: text("created_at").notNull(),
+});
+export const discoveryCandidates = sqliteTable(
+  "discovery_candidates",
+  {
+    id: text("id").primaryKey(),
+    ticker: text("ticker")
+      .notNull()
+      .references(() => companies.ticker),
+    url: text("url").notNull(),
+    title: text("title").notNull(),
+    type: text("type").notNull(),
+    published_at: text("published_at"),
+    period: text("period"),
+    size_bytes: integer("size_bytes"),
+    status: text("status").notNull(),
+    detail: text("detail"),
+    document_id: text("document_id").references(() => documents.id),
+    checked_at: text("checked_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("candidate_url").on(t.ticker, t.url),
+    index("candidate_status").on(t.ticker, t.status),
+  ],
 );
 export const requestBudgets = sqliteTable(
   "request_budgets",

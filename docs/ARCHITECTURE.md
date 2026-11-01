@@ -44,3 +44,9 @@ Retrieval is restricted by ticker, period and type. FTS5 adds ranked candidates;
 Cache keys include company, normalized question, document hashes, complete metric version, retrieval/prompt version, model and filters. Extraction caching is separate from answer caching. Source changes cannot reuse an answer for an old corpus version. Provider failures do not become successful research cache entries.
 
 See [database design](DATABASE_DESIGN.md), [AI pipeline](AI_PIPELINE.md), [verification](VERIFICATION.md) and [limitations](KNOWN_LIMITATIONS.md).
+
+## Reliability revision, 2 November 2026
+
+`lib/ingestion` separates public source adapters, candidate ranking and administrative file batches. NTPC's public dated table is registered as source configuration; financial analysis remains company-independent. Directory links are discovery metadata only; analytical text always comes from original PDFs. Protected jobs bound company and owner work and expose continuation cursors.
+
+`lib/query-plans.ts` builds parameterized FTS and cursor queries. FTS hits are returned directly from SQLite, including late chunks; guidance-target queries retain source-period provenance. Company revision triggers feed selective research keys, together with prompt/model/retrieval versions. Financial selection resolves verified restatements and refuses conflicting facts. New details and all verified results are in [RELIABILITY_UPGRADE.md](RELIABILITY_UPGRADE.md).

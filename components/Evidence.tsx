@@ -58,6 +58,24 @@ export function EventDetail({
         <p>{data.summary}</p>
         <h3>Why it deserves a closer look</h3>
         <p>{data.why}</p>
+        {data.materiality_reasons && (
+          <details>
+            <summary>Why this priority score?</summary>
+            <ul>
+              {data.materiality_reasons.map((reason, i) => (
+                <li key={i}>{reason}</li>
+              ))}
+            </ul>
+            <p>
+              Magnitude:{" "}
+              {data.materiality_attributes?.magnitude_status.replaceAll(
+                "_",
+                " ",
+              )}
+              . Score indicates attention priority, not a price prediction.
+            </p>
+          </details>
+        )}
       </div>
       {data.category === "results" && (
         <FinancialTable

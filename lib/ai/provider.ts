@@ -112,6 +112,36 @@ export function verifyFinding(
   // A cited ID is insufficient: require a literal excerpt, lexical relationship, and supported numbers.
   const words = clean(f.claim).match(/[a-z]{4,}/g) ?? [];
   const evidence = clean(refs.map((s) => s!.text).join(" "));
+  const excerpt = clean(f.evidence_excerpt),
+    claim = clean(f.claim);
+  // Conservative directional/qualifier guards. A literal citation is not entailment.
+  if (
+    /\b(?:declined|decreased|fell|contracted)\b/.test(excerpt) &&
+    /\b(?:increased|rose|expanded|accelerated)\b/.test(claim) &&
+    !/\b(?:increased|rose|expanded|accelerated)\b/.test(excerpt)
+  )
+    return false;
+  if (
+    /\b(?:increased|rose|expanded)\b/.test(excerpt) &&
+    /\b(?:declined|decreased|fell|contracted)\b/.test(claim) &&
+    !/\b(?:declined|decreased|fell|contracted)\b/.test(excerpt)
+  )
+    return false;
+  if (
+    /\b(?:proposed|subject to approval|may|could|expects|expected|target|guidance)\b/.test(
+      excerpt,
+    ) &&
+    /\b(?:completed|guaranteed|certain|has achieved|delivered)\b/.test(claim) &&
+    !/\b(?:completed|has achieved|delivered)\b/.test(excerpt)
+  )
+    return false;
+  if (
+    /\b(?:not|no|never)\b.{0,30}\b(?:guidance|growth|assurance|guarantee)\b/.test(
+      excerpt,
+    ) &&
+    /\b(?:guaranteed|assured|will achieve)\b/.test(claim)
+  )
+    return false;
   const meaningful = words.filter(
     (w) =>
       ![
@@ -255,6 +285,7 @@ export const metricExtraction = z.object({
     "Borrowings",
     "Equity",
     "Capex",
+    "Capital expenditure",
     "Operating margin",
     "Revenue growth",
   ]),
@@ -376,6 +407,34 @@ export async function extractFinancialMetrics(
       return false;
     if (!numbers(m.value_text).some((n) => n === m.value)) return false;
     const context = clean(s.text);
+    // Retrieval aliases are not accounting equivalences. Operating profit alone
+    // cannot establish EBITDA, even when the amount and source ID are genuine.
+    const labelContext = clean(m.evidence_excerpt);
+    if (
+      m.name === "EBITDA" &&
+      !/\bebitda\b|before interest.{0,25}tax.{0,25}depreciation.{0,25}amorti[sz]ation/.test(
+        labelContext,
+      )
+    )
+      return false;
+    if (m.name === "PBT" && !/\bpbt\b|profit before tax/.test(labelContext))
+      return false;
+    if (
+      m.name === "PAT" &&
+      !/\bpat\b|net profit|profit after tax/.test(labelContext)
+    )
+      return false;
+    const periodText = clean(m.evidence_excerpt + " " + s.period).replace(
+      /fy\s*['’]?\s*(\d{2,4})/g,
+      (_, y) => `fy${Number(y) < 100 ? 2000 + Number(y) : y}`,
+    );
+    if (
+      !periodText.includes(clean(m.period)) &&
+      !periodText
+        .replace(/\s/g, "")
+        .includes(clean(m.period).replace(/\s/g, ""))
+    )
+      return false;
     if (/consolidated/i.test(m.basis) && !context.includes("consolidated"))
       return false;
     if (/standalone/i.test(m.basis) && !context.includes("standalone"))
@@ -395,6 +454,13 @@ export async function extractFinancialMetrics(
     )
       return false;
     if (g.target_min === null && g.target_max === null) return false;
+    const periodText = clean(g.evidence_excerpt + " " + s!.text).replace(
+      /fy\s*['’]?\s*(\d{2,4})/g,
+      (_, y) => `fy${Number(y) < 100 ? 2000 + Number(y) : y}`,
+    );
+    if (!periodText.includes(clean(g.target_period))) return false;
+    if (/consolidated/i.test(g.basis) && !/consolidated/i.test(s!.text))
+      return false;
     if (
       g.target_min !== null &&
       g.target_max !== null &&

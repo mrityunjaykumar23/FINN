@@ -1,3 +1,7 @@
+import { syncAnnouncements } from "@/lib/ingestion/announcements";
+import { importFileBatch } from "@/lib/ingestion/local-file";
+import { searchCompanies } from "@/lib/company-search";
+import { companySyncBatch } from "@/lib/query-plans";
 import { z } from "zod";
 import { env } from "cloudflare:workers";
 import {
@@ -12,6 +16,8 @@ import {
   resolveCompany,
   getPoints,
   getFilings,
+  getFilingById,
+  getFilingPage,
   getDocument,
   eventDetail,
   digest,
@@ -70,7 +76,10 @@ const settingsSchema = z.object({
 const questionSchema = z.object({
   ticker: z.string().min(1).max(32),
   question: z.string().trim().min(3).max(800),
-  period: z.string().max(60).optional(),
+  period: z
+    .string()
+    .regex(/^(?:Q[1-4]\s+)?FY\d{4}$/)
+    .optional(),
   type: z.enum(["annual_report", "transcript", "results"]).optional(),
 });
 async function body(request: Request) {
@@ -88,7 +97,7 @@ async function body(request: Request) {
     }
     chunks.push(part.value);
   }
-  if(length===0)return {};
+  if (length === 0) return {};
   const bytes = new Uint8Array(length);
   let offset = 0;
   for (const c of chunks) {
@@ -172,7 +181,7 @@ async function handle(request: Request) {
         llm_configured: providerStatus().enabled,
       };
     else if (path === "status" && method === "GET")
-      result = await systemStatus();
+      result = await systemStatus(owner);
     else if (path === "portfolio" && method === "GET")
       result = { companies: await portfolioFor(owner, mode), mode };
     else if (path === "portfolio" && method === "POST") {
@@ -263,9 +272,29 @@ async function handle(request: Request) {
       if (filters.end) dateSchema.parse(filters.end);
       if (filters.category) z.enum(categories).parse(filters.category);
       if (filters.mode) z.enum(["historical", "live"]).parse(filters.mode);
-      result = { announcements: await getFilings(filters) };
+      result = await getFilingPage({
+        ...filters,
+        limit: z.coerce
+          .number()
+          .int()
+          .min(1)
+          .max(200)
+          .parse(url.searchParams.get("limit") ?? 50),
+        priority: url.searchParams.has("priority")
+          ? z.coerce
+              .number()
+              .min(0)
+              .max(100)
+              .parse(url.searchParams.get("priority"))
+          : undefined,
+        cursor: url.searchParams.has("cursor")
+          ? z.string().max(700).parse(url.searchParams.get("cursor"))
+          : undefined,
+      });
     } else if (path.startsWith("announcements/") && method === "GET") {
-      const f = (await getFilings()).find((f) => f.id === path.slice(14));
+      const f = await getFilingById(
+        z.string().min(1).max(160).parse(path.slice(14)),
+      );
       if (!f)
         throw new ApiError(
           404,
@@ -288,7 +317,7 @@ async function handle(request: Request) {
         event_type: string;
         triggered_at: string;
       }>(
-        `SELECT * FROM alerts WHERE owner=? ${status ? "AND status=?" : ""} ORDER BY triggered_at DESC LIMIT 100`,
+        `SELECT * FROM alerts WHERE owner=? AND NOT EXISTS (SELECT 1 FROM announcements a WHERE a.id=alerts.announcement_id AND json_extract(a.payload,'$.canonical_event_id') IS NOT NULL) ${status ? "AND status=?" : ""} ORDER BY triggered_at DESC LIMIT 100`,
         owner,
         ...(status ? [status] : []),
       );
@@ -364,21 +393,10 @@ async function handle(request: Request) {
       };
     } else if (path === "companies/search" && method === "GET") {
       const q = z
-          .string()
-          .max(60)
-          .parse(url.searchParams.get("q") ?? "")
-          .trim(),
-        escaped = q.replace(/[\\%_]/g, "\\$&");
-      const local = await all<Company>(
-        "SELECT * FROM companies WHERE instr(lower(ticker),lower(?))>0 OR instr(lower(name),lower(?))>0 ORDER BY name LIMIT 12",
-        q,
-        q,
-      );
-      if (!local.length && q) {
-        await budget("global:resolve", 60);
-        local.push((await resolveCompany(q)) as Company);
-      }
-      result = { companies: local };
+        .string()
+        .max(60)
+        .parse(url.searchParams.get("q") ?? "");
+      result = await searchCompanies(q, owner);
     } else if (/^companies\/[^/]+\/overview$/.test(path) && method === "GET") {
       const ticker = normalizeTicker(path.split("/")[1]),
         company = await resolveCompany(ticker);
@@ -437,6 +455,8 @@ async function handle(request: Request) {
           evidence_page: z.number().int().positive(),
           mode: z.enum(["historical", "live"]).default("live"),
           reprocess: z.boolean().default(false),
+          event_quote: z.string().min(20).max(20000).optional(),
+          exchange_filing_id: z.string().min(1).max(500).optional(),
         })
         .refine(
           (v) => !!v.document_id || !!v.url,
@@ -448,6 +468,40 @@ async function handle(request: Request) {
         ticker: normalizeTicker(input.ticker),
       });
       await evaluateAlerts(owner, input.mode);
+    } else if (path === "admin/import-file-batch" && method === "POST") {
+      admin(request);
+      const input = z
+        .object({
+          ticker: z.string().max(32),
+          url: z.string().url().max(1000),
+          title: z.string().max(200),
+          type: z.enum([
+            "annual_report",
+            "results",
+            "transcript",
+            "presentation",
+            "announcement",
+          ]),
+          hash: z.string().regex(/^[a-f0-9]{64}$/),
+          total_pages: z.number().int().min(1).max(1000),
+          expected_chunks: z.number().int().min(1).max(20000),
+          chunks: z
+            .array(
+              z.object({
+                page: z.number().int().min(1).max(1000),
+                index: z.number().int().min(0).max(1000),
+                text: z.string().max(2100),
+              }),
+            )
+            .min(1)
+            .max(12),
+          final: z.boolean(),
+        })
+        .parse(parsedBody);
+      result = await importFileBatch({
+        ...input,
+        ticker: normalizeTicker(input.ticker),
+      });
     } else if (path === "admin/ingest-document" && method === "POST") {
       admin(request);
       const input = z
@@ -482,6 +536,45 @@ async function handle(request: Request) {
         input.refresh_market,
         input.tickers?.map(normalizeTicker),
       );
+    } else if (
+      (path === "admin/sync-announcements" ||
+        path === "admin/sync-intelligence") &&
+      method === "POST"
+    ) {
+      admin(request);
+      const input = z
+        .object({
+          tickers: z.array(z.string().max(32)).max(30).optional(),
+          after: z.string().max(32).optional(),
+          owner_after: z.string().max(100).optional(),
+        })
+        .parse(parsedBody);
+      const tickers = input.tickers?.map(normalizeTicker);
+      const marketTickers =
+        (tickers ? companySyncBatch(tickers, input.after).batch : undefined) ??
+        (
+          await all<{ ticker: string }>(
+            "SELECT DISTINCT ticker FROM portfolio_companies WHERE ticker>? ORDER BY ticker LIMIT 3",
+            input.after ?? "",
+          )
+        ).map((c) => c.ticker);
+      const market =
+        path === "admin/sync-intelligence"
+          ? await evaluateAll(
+              "live",
+              true,
+              marketTickers.slice(0, 3),
+              input.owner_after,
+            )
+          : undefined;
+      result = {
+        market,
+        announcements: await syncAnnouncements(
+          tickers,
+          input.after,
+          input.owner_after,
+        ),
+      };
     } else if (path === "companies/refresh-documents" && method === "POST") {
       const input = tickerInput.parse(parsedBody),
         ticker = normalizeTicker(input.ticker);

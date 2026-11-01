@@ -5,7 +5,12 @@ import {
   type Metric,
   type Guidance,
 } from "./domain.ts";
-import { comparisonPeriods, sortPeriods } from "./periods.ts";
+import {
+  comparisonPeriods,
+  sortPeriods,
+  selectMetric,
+  compatibleMetrics,
+} from "./periods.ts";
 export type CalculatedFinding = {
   text: string;
   sources: { document_id: string; page: number }[];
@@ -40,13 +45,13 @@ export function calculateFindings(
     !!b &&
     a.value !== null &&
     b.value !== null &&
-    a.basis === b.basis &&
-    a.unit === b.unit &&
+    compatibleMetrics(a, b) &&
     (!samePeriod || a.period === b.period);
   if (/guidance|promise|deliver/.test(q)) {
     const relevant = guidance.filter(
       (g) =>
         g.ticker === ticker &&
+        !g.superseded &&
         (!requestedPeriod || g.period === requestedPeriod) &&
         (!/margin/.test(q) || g.metric === "Operating margin") &&
         (!/revenue/.test(q) || g.metric === "Revenue growth"),
@@ -74,13 +79,10 @@ export function calculateFindings(
           )
           .map((m) => m.period),
       ).find((p) => /^FY/.test(p));
-    const pat = rows.find((m) => m.name === "PAT" && m.period === cashPeriod),
-      ocf = rows.find(
-        (m) => m.name === "Operating cash flow" && m.period === cashPeriod,
-      ),
-      fcf = rows.find(
-        (m) => m.name === "Free cash flow" && m.period === cashPeriod,
-      );
+    const ocf = selectMetric(rows, "Operating cash flow", cashPeriod),
+      fcf = selectMetric(rows, "Free cash flow", cashPeriod, ocf),
+      pat = selectMetric(rows, "PAT", cashPeriod, ocf ?? fcf),
+      capex = selectMetric(rows, "Capital expenditure", cashPeriod, ocf);
     const cash = ocf ?? fcf;
     if (
       comparable(cash, pat, true) &&
@@ -102,9 +104,16 @@ export function calculateFindings(
       comparable(ocf, fcf, true)
     )
       findings.push({
-        text: `FY2025 reported free cash flow was ${amount(fcf)}. Free cash flow is after capital expenditure; inspect the cash-flow statement for working-capital movements.`,
+        text: `${fcf.period} reported free cash flow was ${amount(fcf)}. Free cash flow is after capital expenditure; inspect the cash-flow statement for working-capital movements.`,
         sources: [source(fcf)],
       });
+    else if (ocf && capex && comparable(ocf, capex, true)) {
+      const value = ocf.value! - Math.abs(capex.value!);
+      findings.push({
+        text: `${ocf.period} calculated free cash flow was ${amount({ ...ocf, value })}: operating cash flow of ${amount(ocf)} less capital expenditure of ${amount({ ...capex, value: Math.abs(capex.value!) })}. Capital expenditure is treated as an outflow magnitude; both inputs use ${ocf.basis} and ${ocf.unit}.`,
+        sources: [source(ocf), source(capex)],
+      });
+    }
   }
   if (/revenue|growth/.test(q) && !/guidance|promise|deliver/.test(q)) {
     const annual = /annual|multi.year|full.year/.test(q),
@@ -118,9 +127,7 @@ export function calculateFindings(
             )[0]
           : comparisonPeriods(rows)[0]);
     const periods = comparisonPeriods(rows, currentPeriod);
-    const current = rows.find(
-      (m) => m.name === "Revenue" && m.period === currentPeriod,
-    );
+    const current = selectMetric(rows, "Revenue", currentPeriod);
     const comparisons = annual
       ? [[periods[1], "year on year"]]
       : [
@@ -128,9 +135,9 @@ export function calculateFindings(
           [periods[2], "year on year"],
         ];
     for (const [period, label] of comparisons) {
-      const base = rows.find(
-        (m) => m.name === "Revenue" && m.period === period,
-      );
+      const base = current
+        ? selectMetric(rows, "Revenue", period, current)
+        : undefined;
       if (comparable(current, base) && current.value !== null && base) {
         const change = percentChange(current.value, base.value);
         if (change.value !== null)

@@ -9,6 +9,9 @@ The database is SQLite locally and SQLite-compatible D1 in the retained hosted a
 3. `0002_tired_lady_vermin.sql`: ticker/mode/date market index, legacy alert field backfill and triggers requiring genuine indexed pages for metrics/guidance; referenced evidence pages cannot be removed.
 4. `0003_bumpy_marten_broadcloak.sql`: source-period provenance and derived comparisons referencing both original metrics.
 
+5. `0004_flimsy_deathbird.sql`: separate event signatures/exchange identities, stable feed index, company revision counters and triggers, discovery candidates, extraction audit, restatement metadata, and source-sync counts/cursor. Existing event IDs are retained.
+6. `0005_parallel_outlaw_kid.sql`: compatible-actual lookup index and database triggers refusing incomparable guidance/derived metric references.
+
 The migration journal and Drizzle snapshots are tracked. Do not modify already applied SQL. No financial records, watchlists or preferences are reset by migration.
 
 ## Backup and recovery
@@ -36,3 +39,7 @@ For recovery, keep the server stopped. Preserve the current database and its sid
 | request_budgets, job_locks | Atomic persisted global/session cost limits and expiring concurrency controls |
 
 FTS5 is compatible with local SQLite/D1 and tested. A bounded lexical fallback remains available. Existing facts are not destroyed when a conservative parser no longer accepts an extraction; it marks those rows unverified and excludes them from research/calculation inputs.
+
+Event payloads may retain `canonical_event_id` for historical aliases; their records and alert references remain intact and direct IDs remain available. Normal feeds and future alert evaluation use canonical records. Explicit event quotes distinguish same-category events on a shared page; categories distinguish results/dividend/management events in one document.
+
+Backups were taken before both reliability migrations. A copy of the latest populated pre-upgrade database preserved all counts across companies, documents/chunks, metrics, owners, portfolios, settings, announcements, alerts, guidance and caches while applying 0004/0005, with zero foreign-key violations. Empty and original seeded/custom-owner databases also ran the full migration sequence.

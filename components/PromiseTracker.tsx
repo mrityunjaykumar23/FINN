@@ -185,7 +185,11 @@ export function GuidanceCard({
             {g.guidance_type ?? "range"}
             {g.revised ? " · revised guidance" : ""}
           </p>
-          <span>{g.sources[0]?.period} · Primary statement</span>
+          <span>
+            {g.stated_at
+              ? `Stated ${g.stated_at.slice(0, 10)} → target ${g.period}`
+              : `${g.sources[0]?.period} · Statement date unverified`}
+          </span>
         </div>
         <div className="guidance-statement actual">
           <div className="mini-eyebrow">02 / THE REPORTED RESULT</div>

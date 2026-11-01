@@ -181,3 +181,119 @@ export function extractReportedProse(pages: { page: number; text: string }[]) {
     guidance,
   };
 }
+
+/** Delimited text tables only. Never guess flattened PDF column alignment. */
+export function extractExplicitTables(pages: { page: number; text: string }[]) {
+  const metrics: ExtractedMetric[] = [],
+    rejected: { page: number; reason: string }[] = [];
+  const names: [RegExp, string][] = [
+    [/^(revenue(?: from operations)?|sales)$/i, "Revenue"],
+    [/^EBITDA$/i, "EBITDA"],
+    [/^(PBT|profit before tax)$/i, "PBT"],
+    [/^(PAT|net profit|profit after tax)$/i, "PAT"],
+    [
+      /^(operating cash flow|cash from operations|net cash (?:generated )?from operating activities)$/i,
+      "Operating cash flow",
+    ],
+    [
+      /^(capital expenditure|capex|purchase of property,? plant and equipment)$/i,
+      "Capital expenditure",
+    ],
+    [/^free cash flow$/i, "Free cash flow"],
+    [/^(total debt|borrowings)$/i, "Debt"],
+    [/^(total equity|shareholders.? equity)$/i, "Equity"],
+  ];
+  for (const page of pages) {
+    const text = page.text;
+    const basis =
+      /\bconsolidated\b/i.test(text) && !/\bstandalone\b/i.test(text)
+        ? "Consolidated reported INR"
+        : /\bstandalone\b/i.test(text) && !/\bconsolidated\b/i.test(text)
+          ? "Standalone reported INR"
+          : null;
+    const units = [
+      ...text.matchAll(/(?:INR|₹|Rs\.?)\s*(crore|million|lakh|billion)s?\b/gi),
+    ];
+    const scales = [...new Set(units.map((m) => m[1].toLowerCase()))];
+    if (!basis || scales.length !== 1) continue;
+    const lines = text.split(/\r?\n/),
+      split = (line: string) =>
+        line
+          .split(/\s*\|\s*|\t+| {2,}/)
+          .map((x) => x.trim())
+          .filter(Boolean);
+    for (let i = 0; i < lines.length; i++) {
+      const header = split(lines[i]),
+        periods = header.slice(1);
+      if (
+        !periods.length ||
+        !periods.every((p) =>
+          /^(?:Q[1-4]\s+)?FY\d{4}(?:\s*\((?:audited|unaudited|restated)\))?$/i.test(
+            p,
+          ),
+        )
+      )
+        continue;
+      for (let j = i + 1; j < Math.min(lines.length, i + 20); j++) {
+        const cells = split(lines[j]),
+          name = names.find(([re]) => re.test(cells[0] ?? ""))?.[1];
+        if (!name) continue;
+        if (
+          cells.length !== header.length ||
+          !cells.slice(1).every((v) => /^\(?-?[\d,]+(?:\.\d+)?\)?$/.test(v))
+        ) {
+          rejected.push({
+            page: page.page,
+            reason: `${name}: ambiguous or missing table columns; not used in calculations.`,
+          });
+          continue;
+        }
+        for (let k = 0; k < periods.length; k++) {
+          const raw = cells[k + 1],
+            value =
+              Number(raw.replace(/[(),]/g, "")) *
+              (raw.startsWith("(") ? -1 : 1);
+          metrics.push({
+            name,
+            value,
+            period: periods[k].replace(/\s*\([^)]*\)/, "").toUpperCase(),
+            unit: `INR ${scales[0]}`,
+            basis,
+            page: page.page,
+            evidence_text: text,
+            verification_status: "source_checked",
+            extraction_method: "explicit_table_v1",
+            reporting_status: /restated/i.test(periods[k])
+              ? "restated"
+              : /unaudited/i.test(periods[k])
+                ? "unaudited"
+                : /audited/i.test(periods[k])
+                  ? "audited"
+                  : "reported",
+          });
+        }
+      }
+    }
+  }
+  return { metrics, rejected };
+}
+export function extractionPassages<T extends { text: string; page: number }>(
+  chunks: T[],
+  type: string,
+) {
+  const pattern =
+    type === "annual_report"
+      ? /cash flow|operating activities|capital expenditure|borrowings|equity|consolidated|financial statement/i
+      : type === "transcript"
+        ? /guidance|outlook|expect|margin|growth|commit|investment/i
+        : /consolidated|revenue|profit|ebitda|financial results|quarter|guidance/i;
+  return chunks
+    .map((c) => ({
+      c,
+      score: (c.text.match(new RegExp(pattern.source, "gi")) ?? []).length,
+    }))
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score || a.c.page - b.c.page)
+    .slice(0, 16)
+    .map((x) => x.c);
+}

@@ -44,26 +44,64 @@ export const compatibleMetrics = (
   a.basis === b.basis &&
   a.unit === b.unit &&
   a.ticker === b.ticker &&
+  (a.currency ?? a.unit.match(/^(INR|USD)/)?.[0]) ===
+    (b.currency ?? b.unit.match(/^(INR|USD)/)?.[0]) &&
+  (a.scale ?? a.unit.match(/crore|million|billion|lakh/)?.[0]) ===
+    (b.scale ?? b.unit.match(/crore|million|billion|lakh/)?.[0]) &&
   a.verification_status !== "unverified" &&
   b.verification_status !== "unverified";
+/** Prefer explicitly restated facts. Conflicting, equally authoritative facts are unavailable.
+ * An extraction timestamp alone is never evidence of a financial restatement. */
+export function selectMetric(
+  rows: Metric[],
+  name: string,
+  period: string | undefined,
+  anchor?: Metric,
+) {
+  let candidates = rows.filter(
+    (m) =>
+      m.name === name &&
+      m.period === period &&
+      m.value !== null &&
+      Number.isFinite(m.value) &&
+      m.verification_status !== "unverified" &&
+      (!anchor || compatibleMetrics(anchor, m)),
+  );
+  if (!anchor && candidates.some((m) => /consolidated/i.test(m.basis)))
+    candidates = candidates.filter((m) => /consolidated/i.test(m.basis));
+  const restated = candidates.filter((m) => m.reporting_status === "restated");
+  if (restated.length) {
+    const latest = restated
+      .map((m) => m.published_at ?? "")
+      .sort()
+      .at(-1);
+    candidates = restated.filter((m) => (m.published_at ?? "") === latest);
+  }
+  const facts = new Set(
+    candidates.map((m) =>
+      JSON.stringify([
+        m.value,
+        m.basis,
+        m.unit,
+        m.currency ?? m.unit.match(/^(INR|USD)/)?.[0] ?? null,
+        m.scale ?? m.unit.match(/crore|million|billion|lakh/)?.[0] ?? null,
+      ]),
+    ),
+  );
+  return facts.size === 1
+    ? candidates.sort((a, b) => a.id.localeCompare(b.id))[0]
+    : undefined;
+}
 export function quarterlyComparisons(rows: Metric[], requested?: string) {
   const periods = comparisonPeriods(rows, requested);
   return ["Revenue", "EBITDA", "PBT", "PAT"].map((name) => {
-    const preferred = [...rows].sort(
-      (a, b) =>
-        Number(/consolidated/i.test(b.basis)) -
-        Number(/consolidated/i.test(a.basis)),
-    );
-    const current = preferred.find(
-      (m) => m.name === name && m.period === periods[0] && m.value !== null,
-    );
-    const values = periods.map((period) =>
-      preferred.find(
-        (m) =>
-          m.name === name &&
-          m.period === period &&
-          (!current || compatibleMetrics(current, m)),
-      ),
+    const current = selectMetric(rows, name, periods[0]);
+    const values = periods.map((period, i) =>
+      i === 0
+        ? current
+        : current
+          ? selectMetric(rows, name, period, current)
+          : undefined,
     );
     return {
       name,

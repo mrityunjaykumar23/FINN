@@ -16,7 +16,21 @@ import {
 } from "./domain";
 import type { Company, Document, Research, RankedFiling } from "./types";
 import { calculateFindings } from "./research-analysis";
+import {
+  locatePrimaryCandidates,
+  rankCandidates,
+  documentType,
+} from "./ingestion/discovery";
+import announcementSources from "../data/announcement-sources.json";
 import { inferHeaderPeriod } from "./financial-extraction";
+import { sortPeriods } from "./periods";
+import {
+  filingByIdQuery,
+  filingPageQuery,
+  passageQuery,
+  RETRIEVAL_VERSION,
+  type FilingFilters,
+} from "./query-plans";
 const seed = seedData as unknown as {
   version: string;
   as_of: string;
@@ -93,7 +107,7 @@ async function annotateSeed() {
   );
   for (const d of seed.documents)
     await run(
-      "UPDATE documents SET publisher=?,extraction_status=?,total_pages=?,indexed_pages=?,period_status='reviewed' WHERE id=?",
+      "UPDATE documents SET publisher=?,extraction_status=?,total_pages=?,indexed_pages=?,period_status='reviewed' WHERE id=? AND (publisher IS NULL OR period_status<>'reviewed')",
       new URL(d.url).hostname,
       (d as Document & { total_pages?: number }).total_pages! > d.pages.length
         ? "partial"
@@ -107,6 +121,38 @@ let initialization: Promise<void> | null = null;
 export async function initialize() {
   if (initialization) return initialization;
   initialization = (async () => {
+    if (
+      !(await one(
+        "SELECT value FROM meta WHERE key='metric-definition-check-v3'",
+      ))
+    ) {
+      const affected = await all<{ id: string; document_id: string }>(
+        "SELECT id,document_id FROM financial_metrics WHERE extraction_method='gemini' AND name='EBITDA' AND lower(evidence_text) NOT LIKE '%ebitda%' AND verification_status<>'unverified'",
+      );
+      for (const m of affected)
+        await db().batch([
+          db()
+            .prepare(
+              "INSERT INTO extraction_audit(id,document_id,method,status,reason,created_at) VALUES (?,?,?,?,?,?)",
+            )
+            .bind(
+              crypto.randomUUID(),
+              m.document_id,
+              "definition_review_v3",
+              "superseded",
+              `Metric ${m.id}: EBITDA label not explicit in the accepted excerpt; excluded pending review.`,
+              new Date().toISOString(),
+            ),
+          db()
+            .prepare(
+              "UPDATE financial_metrics SET verification_status='unverified' WHERE id=?",
+            )
+            .bind(m.id),
+        ]);
+      await run(
+        "INSERT OR IGNORE INTO meta(key,value) VALUES ('metric-definition-check-v3','complete')",
+      );
+    }
     if (await one("SELECT value FROM meta WHERE key = ?", seed.version)) {
       await annotateSeed();
       await seedGuidance(seed.guidance);
@@ -307,25 +353,31 @@ export async function getPoints(ticker: string, mode = "historical") {
   );
 }
 export async function portfolioFor(owner: string, mode = "historical") {
-  const [companies, settings, filings] = await Promise.all([
+  const [companies, settings, points, counts] = await Promise.all([
     all<Company>(
       "SELECT c.* FROM companies c JOIN portfolio_companies p ON p.ticker=c.ticker WHERE p.owner=? ORDER BY c.name",
       owner,
     ),
     getSettings(owner),
-    getFilings(),
+    all<Point & { ticker: string }>(
+      "SELECT d.ticker,d.date,d.close,d.adjusted_close,d.volume FROM daily_prices d JOIN portfolio_companies p ON p.ticker=d.ticker WHERE p.owner=? AND d.mode=? ORDER BY d.date",
+      owner,
+      mode,
+    ),
+    all<{ ticker: string; n: number }>(
+      "SELECT a.ticker,count(*) n FROM announcements a JOIN portfolio_companies p ON p.ticker=a.ticker WHERE p.owner=? AND a.ingestion_mode=? AND json_extract(a.payload,'$.canonical_event_id') IS NULL AND a.severity>=20 GROUP BY a.ticker",
+      owner,
+      mode,
+    ),
   ]);
-  return Promise.all(
-    companies.map(async (c) => ({
-      ...c,
-      ...marketSummary(
-        await getPoints(c.ticker, mode),
-        settings.volume_lookback,
-      ),
-      events: filings.filter((f) => f.ticker === c.ticker && f.severity >= 20)
-        .length,
-    })),
-  );
+  return companies.map((c) => ({
+    ...c,
+    ...marketSummary(
+      points.filter((p) => p.ticker === c.ticker),
+      settings.volume_lookback,
+    ),
+    events: counts.find((x) => x.ticker === c.ticker)?.n ?? 0,
+  }));
 }
 export async function getFilings(
   filters: {
@@ -337,7 +389,9 @@ export async function getFilings(
     priority?: number;
   } = {},
 ) {
-  const clauses: string[] = [],
+  const clauses: string[] = [
+      "json_extract(payload,'$.canonical_event_id') IS NULL",
+    ],
     values: (string | number)[] = [];
   for (const [key, column, op] of [
     ["ticker", "ticker", "="],
@@ -365,6 +419,43 @@ export async function getFilings(
       "A stored filing is malformed. Other data is preserved.",
     );
   }
+}
+export async function getFilingById(id: string) {
+  const row = await one<{ payload: string }>(filingByIdQuery, id);
+  if (!row) return null;
+  try {
+    return JSON.parse(row.payload) as Filing;
+  } catch {
+    throw new ApiError(
+      503,
+      "invalid_stored_filing",
+      "The stored filing needs review; its source has been preserved.",
+    );
+  }
+}
+export async function getFilingPage(filters: FilingFilters = {}) {
+  let plan;
+  try {
+    plan = filingPageQuery(filters);
+  } catch {
+    throw new ApiError(
+      422,
+      "invalid_cursor",
+      "The announcement cursor is invalid.",
+    );
+  }
+  const rows = await all<{ id: string; date: string; payload: string }>(
+    plan.sql,
+    ...plan.values,
+  );
+  const more = rows.length > plan.limit,
+    page = rows.slice(0, plan.limit),
+    last = page.at(-1);
+  return {
+    announcements: page.map((r) => JSON.parse(r.payload) as Filing),
+    next_cursor:
+      more && last ? btoa(JSON.stringify([last.date, last.id])) : null,
+  };
 }
 export async function getDocument(id: string) {
   const doc = await one<Omit<Document, "pages">>(
@@ -403,7 +494,7 @@ export async function eventDetail(
     ),
   ]);
   const metrics = await all<Metric>(
-    "SELECT id,ticker,name,value,period,unit,basis,document_id,page FROM financial_metrics WHERE ticker=? AND verification_status<>'unverified'",
+    "SELECT m.*,d.published_at FROM financial_metrics m JOIN documents d ON d.id=m.document_id WHERE m.ticker=? AND verification_status<>'unverified'",
     f.ticker,
   );
   await persistComparisons(f.ticker, metrics);
@@ -463,17 +554,22 @@ export async function digest(owner: string, params: URLSearchParams) {
     new Date(new Date(end + "T00:00:00Z").getTime() - (days - 1) * 86400000)
       .toISOString()
       .slice(0, 10);
-  const [portfolio, settings, filings] = await Promise.all([
+  const [portfolio, settings, filingRows] = await Promise.all([
     portfolioFor(owner, mode),
     getSettings(owner),
-    getFilings({
+    all<{ payload: string }>(
+      "SELECT a.payload FROM announcements a JOIN portfolio_companies p ON p.ticker=a.ticker WHERE p.owner=? AND a.ingestion_mode=? AND json_extract(a.payload,'$.canonical_event_id') IS NULL AND a.date>=? AND a.date<=? AND (?='' OR a.ticker=?) AND (?='' OR a.category=?) ORDER BY a.materiality_score DESC,a.date DESC,a.id DESC LIMIT 200",
+      owner,
       mode,
       start,
       end,
-      ticker: params.get("ticker") ?? undefined,
-      category: params.get("category") ?? undefined,
-    }),
+      params.get("ticker") ?? "",
+      params.get("ticker") ?? "",
+      params.get("category") ?? "",
+      params.get("category") ?? "",
+    ),
   ]);
+  const filings = filingRows.map((r) => JSON.parse(r.payload) as Filing);
   const tickers = new Set(portfolio.map((c) => c.ticker));
   const relevant = filings.filter(
     (f) =>
@@ -538,10 +634,23 @@ export async function research(
     ticker,
   );
   const missing: string[] = [];
-  if (!docs.length) {
-    const discovery = await discoverDocuments(ticker);
+  const discoveryState = await one<{ last_attempt: string }>(
+    "SELECT last_attempt FROM source_sync WHERE provider='document_discovery' AND ticker=?",
+    ticker,
+  );
+  const stale =
+    !discoveryState?.last_attempt ||
+    Date.parse(discoveryState.last_attempt) < Date.now() - 86400000;
+  if (
+    !docs.length ||
+    (stale &&
+      !(filters.period && docs.some((d) => d.period === filters.period)))
+  ) {
+    const discovery = await discoverDocuments(ticker, { question, ...filters });
     missing.push(...discovery.limitations);
-    docs.push(
+    docs.splice(
+      0,
+      docs.length,
       ...(await all<Omit<Document, "pages">>(
         "SELECT * FROM documents WHERE ticker=?",
         ticker,
@@ -575,13 +684,51 @@ export async function research(
       d.period = period;
     }
   }
-  const version = docs
-    .map((d) => d.hash)
-    .sort()
-    .join(":");
+  const requestedPeriod =
+    filters.period ??
+    question.match(/(?:Q[1-4]\s+)?FY\d{4}/i)?.[0]?.toUpperCase() ??
+    (/latest|most recent/i.test(question)
+      ? sortPeriods(
+          docs
+            .filter(
+              (d) =>
+                d.period_status !== "unverified" &&
+                (!filters.type || d.type === filters.type),
+            )
+            .map((d) => d.period),
+        ).find((p) =>
+          /annual|full.year/i.test(question)
+            ? p.startsWith("FY")
+            : p.startsWith("Q"),
+        )
+      : undefined);
+  if (requestedPeriod) filters = { ...filters, period: requestedPeriod };
+  const metrics = await all<Metric>(
+    "SELECT m.*,d.published_at FROM financial_metrics m JOIN documents d ON d.id=m.document_id WHERE m.ticker=? AND verification_status<>'unverified'",
+    ticker,
+  );
+  await persistComparisons(ticker, metrics);
+  const version = String(
+    (
+      await one<{ revision: number }>(
+        "SELECT revision FROM company_versions WHERE ticker=?",
+        ticker,
+      )
+    )?.revision ?? 0,
+  );
   const config = providerStatus();
   const key = await sha(
-    `${ticker}:${version}:${question.trim().toLowerCase()}:${JSON.stringify(filters)}:rag-v6:${config.enabled}:${config.model}:${PROMPT_VERSION}:${await sha(JSON.stringify(await all<Metric>("SELECT * FROM financial_metrics WHERE ticker=? AND verification_status<>'unverified' ORDER BY id", ticker)))}`,
+    JSON.stringify({
+      ticker,
+      version,
+      question: question.trim().toLowerCase(),
+      filters,
+      retrieval: RETRIEVAL_VERSION,
+      enabled: config.enabled,
+      model: config.model,
+      reasoning: config.reasoning_model,
+      prompt: PROMPT_VERSION,
+    }),
   );
   const cached = await one<{ payload: string }>(
     "SELECT payload FROM analysis_cache WHERE key=? AND expires_at>?",
@@ -589,7 +736,9 @@ export async function research(
     new Date().toISOString(),
   );
   if (cached) return { ...JSON.parse(cached.payload), cached: true };
-  const passages = await all<{
+  // FTS returns full records directly; a hit never depends on an in-memory library slice.
+  let candidates: {
+    id: string;
     ticker: string;
     text: string;
     page: number;
@@ -598,49 +747,24 @@ export async function research(
     url: string;
     period: string;
     type: string;
-  }>(
-    "SELECT c.ticker,c.text,c.page,c.document_id,d.title,d.url,d.period,d.type FROM document_chunks c JOIN documents d ON d.id=c.document_id WHERE c.ticker=? ORDER BY d.published_at DESC,c.page LIMIT 2500",
-    ticker,
-  );
-  // Prefer FTS-ranked candidates; bounded lexical fallback preserves useful financial aliases.
-  let candidates = passages;
-  const terms = question
-    .match(/[a-zA-Z]{3,}/g)
-    ?.slice(0, 15)
-    .map((t) => `"${t}"`)
-    .join(" OR ");
-  if (terms) {
-    try {
-      const hits = await all<{
-        document_id: string;
-        page: number;
-        text: string;
-      }>(
-        "SELECT c.document_id,c.page,c.text FROM chunks_fts JOIN document_chunks c ON c.id=chunks_fts.chunk_id JOIN documents d ON d.id=c.document_id WHERE chunks_fts MATCH ? AND c.ticker=? ORDER BY rank LIMIT 60",
-        terms,
-        ticker,
-      );
-      if (hits.length)
-        candidates = [
-          ...hits.flatMap((h) =>
-            passages.filter(
-              (p) =>
-                p.document_id === h.document_id &&
-                p.page === h.page &&
-                p.text === h.text,
-            ),
-          ),
-          ...passages,
-        ];
-    } catch {
-      /* FTS is an optimization; the deterministic retriever remains supported. */
-    }
+  }[] = [];
+  try {
+    const plan = passageQuery(ticker, question, filters);
+    candidates = await all(plan.sql, ...plan.values);
+  } catch {
+    /* Indexed SQL lexical fallback below. */
   }
-  const requestedPeriod =
-    filters.period ??
-    question.match(/(?:Q[1-4]\s+)?FY\d{4}/i)?.[0]?.toUpperCase();
-  if (requestedPeriod) filters = { ...filters, period: requestedPeriod };
-  const selected = retrieve(candidates, ticker, question, filters, 8).filter(
+  if (!candidates.length) {
+    const plan = passageQuery(ticker, question, filters, false);
+    candidates = await all(plan.sql, ...plan.values);
+  }
+  const selected = retrieve(
+    candidates,
+    ticker,
+    question,
+    { type: filters.type },
+    8,
+  ).filter(
     (p, i, a) =>
       a.findIndex(
         (x) =>
@@ -658,11 +782,6 @@ export async function research(
     text: s.text,
     period: s.period,
   }));
-  const metrics = await all<Metric>(
-    "SELECT * FROM financial_metrics WHERE ticker=? AND verification_status<>'unverified'",
-    ticker,
-  );
-  await persistComparisons(ticker, metrics);
   const output: Research = {
     ticker,
     question,
@@ -773,7 +892,7 @@ export async function research(
       output.confidence_basis = answer.confidence_basis;
       output.usage = answer.usage;
       output.engine = `Gemini · ${config.model} · evidence checked`;
-      output.model_used = config.model!;
+      output.model_used = answer.model_used;
       output.ai_status = "success";
     } catch (e) {
       output.ai_status = e instanceof AiFailure ? e.code : "validation_failed";
@@ -968,26 +1087,29 @@ export function safeSourceUrl(raw: string, officialHost?: string) {
     return false;
   }
 }
-export async function discoverDocuments(ticker: string) {
+export async function discoverDocuments(
+  ticker: string,
+  task: { question?: string; type?: string; period?: string } = {},
+) {
   try {
     return await trackSync("document_discovery", ticker, async () => {
       const before = await one<{ n: number }>(
         "SELECT count(*) n FROM documents WHERE ticker=?",
         ticker,
       );
-      const result = await discoverDocumentsWork(ticker);
+      const result = await discoverDocumentsWork(ticker, task);
       const after = await one<{ n: number }>(
         "SELECT count(*) n FROM documents WHERE ticker=?",
         ticker,
       );
       const inserted = (after?.n ?? 0) - (before?.n ?? 0);
-      if (result.limitations.length && !inserted)
+      if (result.indexed === 0 && result.failed > 0)
         throw new ApiError(
           503,
           "document_discovery_failed",
           result.limitations.join(" ").slice(0, 900),
         );
-      return { ...result, discovered: inserted, inserted };
+      return { ...result, discovered: result.candidates, inserted };
     });
   } catch (e) {
     return {
@@ -998,80 +1120,98 @@ export async function discoverDocuments(ticker: string) {
     };
   }
 }
-async function discoverDocumentsWork(ticker: string) {
+async function discoverDocumentsWork(
+  ticker: string,
+  task: { question?: string; type?: string; period?: string },
+) {
   const limitations: string[] = [];
-  const symbol = ticker.replace(/\.(NS|BO)$/, "");
-  try {
-    const url = `https://www.screener.in/company/${encodeURIComponent(symbol)}/consolidated/`;
-    const r = await fetch(url, {
-      signal: AbortSignal.timeout(12000),
-      headers: { "User-Agent": "FINN/1.0 primary-document discovery" },
-    });
-    if (!r.ok)
-      return {
-        limitations: [
-          `Document discovery returned HTTP ${r.status}. No access-control bypass was attempted. Import an authentic filing through the protected ingestion route.`,
-        ],
-      };
-    const html = await r.text();
-    // Screener is a link directory only. Its financial tables and opinions are never evidence.
-    const websiteMatch = html.match(
-      /href=["'](https:\/\/[^"']+)["'][^>]*>\s*(?:[\s\S]{0,150}?)?(?:Website|Company website)/i,
-    );
-    let officialHost: string | undefined;
-    if (websiteMatch) {
-      try {
-        officialHost = new URL(websiteMatch[1]).hostname.replace(/^www\./, "");
-      } catch {}
-    }
-    const links = [
-      ...html.matchAll(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi),
-    ].map((m) => ({
-      url: m[1].replace(/&amp;/g, "&"),
-      label: m[2]
-        .replace(/<[^>]*>/g, " ")
-        .replace(/\s+/g, " ")
-        .trim(),
-    }));
-    const candidates = links
-      .filter(
-        (l) =>
-          /\.pdf(?:\?|$)/i.test(l.url) &&
-          safeSourceUrl(l.url, officialHost) &&
-          /annual|report|transcript|concall|result|presentation/i.test(
-            l.label + l.url,
-          ),
-      )
-      .slice(0, 3);
-    if (!candidates.length)
-      limitations.push(
-        "No permitted primary PDF links were discovered. This may be an upstream layout or access restriction; no company facts were inferred.",
-      );
-    for (const link of candidates) {
-      try {
-        const documentId = await ingestPdf(
-          ticker,
-          link.url,
-          link.label || "Primary company document",
-          officialHost,
-        );
-        await extractDocument(ticker, documentId).catch(() => {
-          limitations.push(
-            "Gemini extraction unavailable; original source text remains indexed.",
-          );
-        });
-      } catch (e) {
-        limitations.push(
-          `A primary document could not be indexed: ${e instanceof Error ? e.message : "source unavailable"}`,
-        );
-      }
-    }
-  } catch {
-    limitations.push(
-      "Primary-document discovery timed out or was unavailable. Research requires a retrievable primary source.",
+  const { candidates } = await locatePrimaryCandidates(ticker, safeSourceUrl);
+  for (const c of candidates) {
+    await run(
+      "INSERT INTO discovery_candidates(id,ticker,url,title,type,published_at,period,status,checked_at) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(ticker,url) DO UPDATE SET title=excluded.title,type=excluded.type,checked_at=excluded.checked_at",
+      await sha(`${ticker}:${c.url}`),
+      ticker,
+      c.url,
+      c.title,
+      c.type,
+      c.published_at,
+      c.period,
+      "discovered",
+      new Date().toISOString(),
     );
   }
-  return { limitations };
+  const ranked = rankCandidates(candidates, task.question, task);
+  // At most four documents per interactive refresh; pending/failed candidates remain resumable.
+  const pending = [];
+  for (const c of ranked) {
+    const known = await one<{ id: string }>(
+      "SELECT id FROM documents WHERE ticker=? AND url=?",
+      ticker,
+      c.url,
+    );
+    if (!known) pending.push(c);
+    else
+      await run(
+        "UPDATE discovery_candidates SET status='indexed',document_id=? WHERE ticker=? AND url=?",
+        known.id,
+        ticker,
+        c.url,
+      );
+  }
+  let indexed = 0,
+    failed = 0;
+  for (const c of pending.slice(0, 4)) {
+    try {
+      const id = await ingestPdf(ticker, c.url, c.title, c.officialHost);
+      await run(
+        "UPDATE documents SET type=?,published_at=coalesce(published_at,?) WHERE id=?",
+        c.type,
+        c.published_at,
+        id,
+      );
+      await run(
+        "UPDATE discovery_candidates SET status='indexed',document_id=?,detail=NULL WHERE ticker=? AND url=?",
+        id,
+        ticker,
+        c.url,
+      );
+      indexed++;
+      const result = await extractDocument(ticker, id);
+      if (result.status.includes("failed"))
+        limitations.push(
+          "Financial extraction unavailable; indexed source text remains available.",
+        );
+    } catch (e) {
+      failed++;
+      const detail =
+        e instanceof ApiError
+          ? e.message
+          : "Original PDF unavailable, oversized or not extractable. Use protected import after verifying the original source.";
+      await run(
+        "UPDATE discovery_candidates SET status='unavailable',detail=? WHERE ticker=? AND url=?",
+        detail,
+        ticker,
+        c.url,
+      );
+      limitations.push(detail);
+    }
+  }
+  if (!candidates.length)
+    limitations.push(
+      "No permitted primary PDF links found. This is incomplete coverage, not proof of no disclosures.",
+    );
+  if (pending.length > 4)
+    limitations.push(
+      `${pending.length - 4} additional candidate documents remain pending a controlled refresh.`,
+    );
+  return {
+    limitations: [...new Set(limitations)],
+    indexed,
+    failed,
+    candidates: candidates.length,
+    discovered: candidates.length,
+    status: failed ? "partial" : "success",
+  };
 }
 export async function ingestPdf(
   ticker: string,
@@ -1079,6 +1219,11 @@ export async function ingestPdf(
   title: string,
   officialHost?: string,
 ) {
+  if (!officialHost) {
+    officialHost = announcementSources.find(
+      (s) => s.ticker === ticker,
+    )?.officialHost;
+  }
   if (!officialHost) {
     const trusted = await one<{ url: string }>(
       "SELECT url FROM documents WHERE ticker=? AND url NOT LIKE ? LIMIT 1",
@@ -1123,10 +1268,23 @@ export async function ingestPdf(
     throw new Error(
       `HTTP ${r.status}; source access restrictions were respected`,
     );
-  const maxBytes = 8 * 1024 * 1024;
+  const pdfConfig = env as unknown as {
+    PDF_MAX_MB?: string;
+    PDF_MAX_PAGES?: string;
+  };
+  const maxBytes =
+    Math.max(1, Math.min(16, Number(pdfConfig.PDF_MAX_MB) || 8)) * 1024 * 1024;
+  const declaredSize = Number(r.headers.get("content-length") ?? 0);
+  if (declaredSize > 0)
+    await run(
+      "UPDATE discovery_candidates SET size_bytes=? WHERE ticker=? AND url=?",
+      declaredSize,
+      ticker,
+      url,
+    );
   if (Number(r.headers.get("content-length") ?? 0) > maxBytes)
     throw new Error(
-      "Document exceeds the 8 MB interactive limit; use Python ingestion.",
+      "Document exceeds the 8 MB interactive limit. Its candidate remains recorded; an administrator can import the original with the bounded local-file workflow.",
     );
   const reader = r.body?.getReader();
   if (!reader) throw new Error("Empty document");
@@ -1173,7 +1331,10 @@ export async function ingestPdf(
     );
   const { getDocumentProxy, extractText } = await import("unpdf");
   const pdf = await getDocumentProxy(bytes, { maxImageSize: 1000000 });
-  if (pdf.numPages > 500) {
+  if (
+    pdf.numPages >
+    Math.max(1, Math.min(1000, Number(pdfConfig.PDF_MAX_PAGES) || 500))
+  ) {
     await pdf.loadingTask.destroy();
     throw new Error("Document exceeds the 500-page limit");
   }
@@ -1216,11 +1377,7 @@ export async function ingestPdf(
     ? `Q${header[1]} FY${Number(header[2]) < 100 ? 2000 + Number(header[2]) : header[2]}`
     : "Period not verified";
   const id = `live-${hash.slice(0, 20)}`,
-    type = /transcript|concall/i.test(title + url)
-      ? "transcript"
-      : /annual/i.test(title + url)
-        ? "annual_report"
-        : "results";
+    type = documentType(title + " " + url);
   const documentInsert = db()
     .prepare(
       "INSERT OR IGNORE INTO documents(id,ticker,title,type,period,url,published_at,retrieved_at,hash,mode,publisher,extraction_status,total_pages,indexed_pages) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",

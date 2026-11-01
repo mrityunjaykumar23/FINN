@@ -1,3 +1,7 @@
+# Current reliability audit — 2 November 2026
+
+The requested weaknesses were verified against 9378c42 and addressed in this same checkout. [The checklist](RELIABILITY_CHECKLIST.md), [change report](RELIABILITY_UPGRADE.md), and [actual verification](VERIFICATION.md) distinguish preserved implementations, new fixes and remaining limitations. The earlier audit below is retained as build history, not a list of currently unresolved defects.
+
 # FINN implementation audit
 
 Audit baseline: public source commit ed262f46, 31 October 2026. Work happens on `upgrade/sqlite-gemini-push-pull`, localhost only. No GitHub push or deployment is part of this upgrade.

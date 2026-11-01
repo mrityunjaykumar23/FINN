@@ -1,4 +1,4 @@
-import { quarterlyComparisons } from "./periods";
+import { quarterlyComparisons, selectMetric } from "./periods";
 import {
   db,
   all,
@@ -29,6 +29,12 @@ import {
   storeMarket,
 } from "./server";
 import { extractDocument, providerStatus, classifyWithAi } from "./ai/service";
+import {
+  analyzeMateriality,
+  categoryForEvent,
+  eventEvidence,
+  normalizeEvidence,
+} from "./event-analysis";
 
 export async function persistFiling(
   f: Filing,
@@ -46,10 +52,11 @@ export async function persistFiling(
       "invalid_evidence",
       "A matching company source and indexed evidence page are required.",
     );
-  const hash = await sha(`${doc.hash}:page:${f.evidence_page}`),
+  const signature = f.event_signature ?? `legacy:${f.id}`;
+  const hash = await sha(`${f.ticker}:${doc.hash}:${signature}`),
     score = rank(f, defaultSettings).score;
   const result = await run(
-    `INSERT INTO announcements(id,ticker,hash,document_id,date,payload,headline,category,summary,why_it_matters,published_at,detected_at,source_url,classification_method,classification_confidence,materiality_score,materiality_reason,severity,magnitude,novelty,evidence_coverage,verification_status,ingestion_mode) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,headline=excluded.headline,category=excluded.category,summary=excluded.summary,why_it_matters=excluded.why_it_matters,published_at=excluded.published_at,source_url=excluded.source_url,classification_method=excluded.classification_method,classification_confidence=excluded.classification_confidence,materiality_score=excluded.materiality_score,materiality_reason=excluded.materiality_reason,severity=excluded.severity,magnitude=excluded.magnitude,novelty=excluded.novelty,evidence_coverage=excluded.evidence_coverage`,
+    `INSERT INTO announcements(id,ticker,hash,document_id,date,payload,headline,category,summary,why_it_matters,published_at,detected_at,source_url,classification_method,classification_confidence,materiality_score,materiality_reason,severity,magnitude,novelty,evidence_coverage,verification_status,ingestion_mode,event_signature,exchange_filing_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET hash=excluded.hash,event_signature=excluded.event_signature,exchange_filing_id=excluded.exchange_filing_id,payload=excluded.payload,headline=excluded.headline,category=excluded.category,summary=excluded.summary,why_it_matters=excluded.why_it_matters,published_at=excluded.published_at,source_url=excluded.source_url,classification_method=excluded.classification_method,classification_confidence=excluded.classification_confidence,materiality_score=excluded.materiality_score,materiality_reason=excluded.materiality_reason,severity=excluded.severity,magnitude=excluded.magnitude,novelty=excluded.novelty,evidence_coverage=excluded.evidence_coverage`,
     f.id,
     f.ticker,
     hash,
@@ -73,6 +80,8 @@ export async function persistFiling(
     f.evidence,
     "source_linked",
     mode,
+    signature,
+    f.exchange_filing_id ?? null,
   );
   return result.meta.changes;
 }
@@ -159,13 +168,13 @@ type Statement = {
 };
 export async function guidanceRows(ticker?: string) {
   const statements = await all<Statement>(
-    `SELECT * FROM guidance_statements ${ticker ? "WHERE ticker=?" : ""} ORDER BY stated_at DESC,id`,
+    `SELECT * FROM guidance_statements WHERE verification_status IN ('reviewed','source_checked','verified') ${ticker ? "AND ticker=?" : ""} ORDER BY stated_at DESC,id`,
     ...(ticker ? [ticker] : []),
   );
   return Promise.all(
     statements.map(async (s) => {
-      const actual = await one<Metric>(
-        "SELECT * FROM financial_metrics WHERE ticker=? AND name=? AND period=? AND basis=? AND unit=? AND value IS NOT NULL AND verification_status IN (?,?,?) ORDER BY updated_at DESC LIMIT 1",
+      const actualRows = await all<Metric>(
+        "SELECT m.*,d.published_at FROM financial_metrics m JOIN documents d ON d.id=m.document_id WHERE m.ticker=? AND name=? AND m.period=? AND basis=? AND unit=? AND value IS NOT NULL AND verification_status IN (?,?,?)",
         s.ticker,
         s.metric,
         s.target_period,
@@ -175,6 +184,7 @@ export async function guidanceRows(ticker?: string) {
         "source_checked",
         "verified",
       );
+      const actual = selectMetric(actualRows, s.metric, s.target_period);
       const superseded = statements.some((g) => g.revision_of === s.id);
       const g: Guidance = {
         id: s.id,
@@ -225,7 +235,18 @@ export async function guidanceRows(ticker?: string) {
           text: d?.pages.find((p) => p.page === loc.page)?.text ?? "",
         });
       }
-      return { ...g, ...result, sources, stated_at: s.stated_at, superseded };
+      return {
+        ...g,
+        ...result,
+        status: superseded ? "Superseded guidance" : result.status,
+        explanation: superseded
+          ? "A later source supersedes this target. Historical comparison: " +
+            result.explanation
+          : result.explanation,
+        sources,
+        stated_at: s.stated_at,
+        superseded,
+      };
     }),
   );
 }
@@ -283,7 +304,7 @@ export async function evaluateAlerts(
       }
     }
     const events = await all<{ id: string; payload: string }>(
-      "SELECT id,payload FROM announcements WHERE ticker=? AND ingestion_mode=? AND date>=? AND date<=?",
+      "SELECT id,payload FROM announcements WHERE ticker=? AND ingestion_mode=? AND date>=? AND date<=? AND json_extract(payload,'$.canonical_event_id') IS NULL",
       c.ticker,
       mode,
       start ?? "0000",
@@ -341,6 +362,7 @@ export async function evaluateAll(
   mode = "live",
   refreshMarket = false,
   requestedTickers?: string[],
+  ownerAfter = "",
 ) {
   const marketResults: { ticker: string; status: string; error?: string }[] =
     [];
@@ -371,15 +393,22 @@ export async function evaluateAll(
     }
   }
   const owners = await all<{ id: string }>(
-    "SELECT id FROM owners WHERE initialized_at IS NOT NULL",
+    "SELECT id FROM owners WHERE initialized_at IS NOT NULL AND id>? ORDER BY id LIMIT 31",
+    ownerAfter,
   );
   const results = [];
-  for (const o of owners) results.push(await evaluateAlerts(o.id, mode));
-  return { owners: owners.length, results, market_sync: marketResults };
+  for (const o of owners.slice(0, 30))
+    results.push(await evaluateAlerts(o.id, mode));
+  return {
+    owners: Math.min(30, owners.length),
+    results,
+    market_sync: marketResults,
+    next_owner_cursor: owners.length > 30 ? owners[29].id : null,
+  };
 }
 export async function trackSync<
   T extends { discovered?: number; inserted?: number; duplicates?: number },
->(provider: string, ticker: string, work: () => Promise<T>) {
+>(provider: string, ticker: string, work: () => Promise<T>, cooldown = true) {
   const key = `sync:${provider}:${ticker}`;
   if (!(await lock(key, 180000)))
     throw new ApiError(
@@ -392,7 +421,11 @@ export async function trackSync<
     provider,
     ticker,
   );
-  if (previous?.next_retry && previous.next_retry > new Date().toISOString()) {
+  if (
+    cooldown &&
+    previous?.next_retry &&
+    previous.next_retry > new Date().toISOString()
+  ) {
     await unlock(key);
     throw new ApiError(
       429,
@@ -419,7 +452,7 @@ export async function trackSync<
           "UPDATE ingestion_runs SET status=?,finished_at=?,discovered=?,inserted=?,duplicates=? WHERE id=?",
         )
         .bind(
-          "success",
+          (result as T & { status?: string }).status ?? "success",
           finished,
           result.discovered ?? 0,
           result.inserted ?? 0,
@@ -436,15 +469,24 @@ export async function trackSync<
           finished,
           started,
           new Date(Date.now() + 60000).toISOString(),
-          "success",
+          (result as T & { status?: string }).status ?? "success",
         ),
     ]);
+    await run(
+      "UPDATE source_sync SET discovered=?,inserted=?,duplicates=?,cursor=coalesce(?,cursor) WHERE provider=? AND ticker=?",
+      result.discovered ?? 0,
+      result.inserted ?? 0,
+      result.duplicates ?? 0,
+      (result as T & { cursor?: string }).cursor ?? null,
+      provider,
+      ticker,
+    );
     return { ...result, run_id: id };
   } catch (e) {
     const message =
       e instanceof ApiError
         ? e.message
-        : "Source operation failed; no successful empty result was recorded.";
+        : `Source operation failed (${e instanceof Error && ["TimeoutError", "TypeError", "AbortError"].includes(e.name) ? e.name : "source_or_storage_error"}); no successful empty result was recorded.`;
     await db().batch([
       db()
         .prepare(
@@ -478,141 +520,183 @@ export async function importFiling(input: {
   evidence_page: number;
   mode: "historical" | "live";
   reprocess?: boolean;
+  event_quote?: string;
+  exchange_filing_id?: string;
 }) {
   await resolveCompany(input.ticker);
-  const knownDoc = input.document_id
-    ? await getDocument(input.document_id)
-    : await one<{ id: string; hash: string }>(
-        "SELECT id,hash FROM documents WHERE ticker=? AND url=?",
+  const known = input.document_id
+    ? { id: input.document_id }
+    : await one<{ id: string }>(
+        "SELECT id FROM documents WHERE ticker=? AND url=?",
         input.ticker,
         input.url ?? "",
       );
-  if (knownDoc) {
-    const existing = await one<{ payload: string }>(
-      "SELECT payload FROM announcements WHERE document_id=? AND ticker=? AND json_extract(payload,'$.evidence_page')=?",
-      knownDoc.id,
-      input.ticker,
-      input.evidence_page,
+  const id =
+    known?.id ?? (await ingestPdf(input.ticker, input.url!, input.headline));
+  const doc = await getDocument(id),
+    page = doc?.pages.find((p) => p.page === input.evidence_page);
+  if (!doc || doc.ticker !== input.ticker || !page)
+    throw new ApiError(
+      422,
+      "invalid_evidence",
+      "A valid matching company source page is required.",
     );
-    if (existing && !input.reprocess)
-      return {
-        filing: JSON.parse(existing.payload) as Filing,
-        discovered: 1,
-        inserted: 0,
-        duplicates: 1,
-      };
+  const rule = categoryForEvent(input.headline, input.event_quote ?? page.text);
+  let quote: string;
+  try {
+    quote = eventEvidence(page.text, rule.category, input.event_quote);
+  } catch {
+    throw new ApiError(
+      422,
+      "invalid_event_quote",
+      "The event quote must occur verbatim on the cited source page.",
+    );
   }
-  return trackSync("filing_import", input.ticker, async () => {
-    const id =
-      input.document_id ??
-      (await ingestPdf(input.ticker, input.url!, input.headline));
-    const doc = await getDocument(id),
-      page = doc?.pages.find((p) => p.page === input.evidence_page);
-    if (!doc || doc.ticker !== input.ticker || !page)
-      throw new ApiError(
-        422,
-        "invalid_evidence",
-        "A valid matching source page is required.",
+  const signature = await sha(`${rule.category}:${normalizeEvidence(quote)}`);
+  // Reconcile legacy records lazily, preserving their public IDs and alert foreign keys.
+  const matches = await all<{
+    id: string;
+    payload: string;
+    event_signature: string;
+  }>(
+    "SELECT id,payload,event_signature FROM announcements WHERE ticker=? AND document_id=? AND json_extract(payload,'$.canonical_event_id') IS NULL AND (event_signature=? OR (((?=1 AND event_signature LIKE 'legacy:%') OR (?=1 AND coalesce(json_extract(payload,'$.event_scope'),'page_category')='page_category')) AND category=? AND json_extract(payload,'$.evidence_page')=?)) ORDER BY detected_at,id",
+    input.ticker,
+    id,
+    signature,
+    input.event_quote ? 0 : 1,
+    input.event_quote ? 0 : 1,
+    rule.category,
+    page.page,
+  );
+  const prior = matches[0];
+  if (matches.length > 1)
+    await db().batch(
+      matches
+        .slice(1)
+        .map((alias) =>
+          db()
+            .prepare(
+              "UPDATE announcements SET event_signature=?,hash=?,payload=json_set(payload,'$.canonical_event_id',?) WHERE id=?",
+            )
+            .bind(`alias:${alias.id}`, `alias:${alias.id}`, prior.id, alias.id),
+        ),
+    );
+  if (matches.length > 1) {
+    // Preserve the strongest existing lifecycle state when historical aliases converge.
+    for (const state of ["dismissed", "read"] as const)
+      await run(
+        "UPDATE alerts SET status=?,read_at=coalesce(read_at,(SELECT max(x.read_at) FROM alerts x JOIN announcements a ON a.id=x.announcement_id WHERE x.owner=alerts.owner AND json_extract(a.payload,'$.canonical_event_id')=?)),dismissed_at=coalesce(dismissed_at,(SELECT max(x.dismissed_at) FROM alerts x JOIN announcements a ON a.id=x.announcement_id WHERE x.owner=alerts.owner AND json_extract(a.payload,'$.canonical_event_id')=?)) WHERE announcement_id=? AND status IN (" +
+          (state === "dismissed" ? "'unread','read'" : "'unread'") +
+          ") AND EXISTS (SELECT 1 FROM alerts x JOIN announcements a ON a.id=x.announcement_id WHERE x.owner=alerts.owner AND x.mode=alerts.mode AND x.status=? AND json_extract(a.payload,'$.canonical_event_id')=?)",
+        state,
+        prior.id,
+        prior.id,
+        prior.id,
+        state,
+        prior.id,
       );
-    const titleRule = classify(input.headline);
-    const rule =
-      titleRule.category !== "unclassified"
-        ? titleRule
-        : classify(page.text.slice(0, 2500));
-    let category = rule.category,
-      summary = page.text.slice(0, 450),
-      why = rule.rationale,
-      method = "rules",
-      confidence = rule.confidence;
-    if (providerStatus().enabled) {
-      try {
-        const ai = await classifyWithAi(input.ticker, [
-          {
-            id: "F1",
-            document_id: id,
-            ticker: input.ticker,
-            page: page.page,
-            text: page.text.slice(0, 5000),
-            period: doc.period,
-          },
-        ]);
-        category = ai.category;
-        summary = ai.summary.claim;
-        why = ai.why_it_matters.claim;
-        confidence = String(ai.confidence);
-        method = "gemini";
-      } catch {
-        why +=
-          " Gemini classification was unavailable or rejected; source excerpt and rule classification shown.";
-      }
-    }
-    const prior = await one<{ id: string }>(
-      "SELECT id FROM announcements WHERE document_id=? AND ticker=? AND json_extract(payload,'$.evidence_page')=?",
-      id,
-      input.ticker,
-      input.evidence_page,
-    );
-    const filingId =
-      prior?.id ??
-      (await sha(`${doc.hash}:page:${input.evidence_page}`)).slice(0, 24);
-    const duplicate = !!(await one(
-      "SELECT id FROM announcements WHERE id=?",
-      filingId,
-    ));
-    const severity =
-      {
-        results: 28,
-        "M&A": 30,
-        litigation: 28,
-        management_change: 26,
-        fund_raise: 22,
-        credit_rating: 22,
-        capex: 20,
-        pledging: 22,
-      }[category as string] ?? 10;
-    const filing: Filing = {
-      id: filingId,
-      ticker: input.ticker,
-      headline: input.headline,
-      date: input.date,
-      date_precision: "Source-supplied publication date; time not verified",
-      category,
-      summary,
-      why,
-      document_id: id,
-      evidence_page: page.page,
-      confidence,
-      severity,
-      magnitude: 0,
-      novelty: 5,
-      evidence: 8,
-      questions: [
-        "What changed in this disclosure?",
-        "What financial guidance is supported?",
-      ],
-    };
-    if (!duplicate || input.reprocess)
-      await persistFiling(filing, input.mode, method);
+  }
+  if (prior && !input.reprocess) {
     await run(
-      "UPDATE documents SET published_at=coalesce(published_at,?) WHERE id=?",
-      input.date,
-      id,
+      "UPDATE announcements SET event_signature=? WHERE id=?",
+      signature,
+      prior.id,
     );
-    const extraction = await extractDocument(input.ticker, id).catch(() => ({
-      status: "provider_failed",
-      metrics: 0,
-      guidance: 0,
-    }));
     return {
-      filing,
-      extraction,
+      filing: JSON.parse(prior.payload) as Filing,
       discovered: 1,
-      inserted: duplicate ? 0 : 1,
-      duplicates: duplicate ? 1 : 0,
+      inserted: 0,
+      duplicates: 1,
     };
-  });
+  }
+  return trackSync(
+    "filing_import",
+    input.ticker,
+    async () => {
+      let summary = quote.slice(0, 450),
+        why = rule.rationale,
+        method = "rules",
+        confidence = rule.confidence;
+      if (providerStatus().enabled) {
+        try {
+          const ai = await classifyWithAi(input.ticker, [
+            {
+              id: "F1",
+              document_id: id,
+              ticker: input.ticker,
+              page: page.page,
+              text: quote.slice(0, 5000),
+              period: doc.period,
+            },
+          ]);
+          // The selected event category is source-scoped; a multi-event PDF cannot silently change it.
+          if (
+            ai.category === rule.category ||
+            rule.category === "unclassified"
+          ) {
+            summary = ai.summary.claim;
+            why = ai.why_it_matters.claim;
+            confidence = String(ai.confidence);
+            method = "gemini";
+          }
+        } catch {
+          why +=
+            " Gemini classification unavailable or rejected; source excerpt and rules shown.";
+        }
+      }
+      const materiality = analyzeMateriality(rule.category, quote);
+      const filing: Filing = {
+        id:
+          prior?.id ??
+          (await sha(`${input.ticker}:${doc.hash}:${signature}`)).slice(0, 24),
+        ticker: input.ticker,
+        headline: input.headline,
+        date: input.date,
+        date_precision: "Source-supplied publication date; time not verified",
+        category: rule.category,
+        summary,
+        why: why + " " + materiality.reasons.join(" "),
+        document_id: id,
+        evidence_page: page.page,
+        confidence,
+        severity: materiality.severity,
+        magnitude: materiality.magnitude,
+        novelty: materiality.novelty,
+        evidence: materiality.evidence,
+        event_signature: signature,
+        exchange_filing_id: input.exchange_filing_id,
+        event_quote: quote,
+        event_scope: input.event_quote ? "explicit" : "page_category",
+        materiality_attributes: materiality.attributes,
+        materiality_reasons: materiality.reasons,
+        questions: [
+          "What changed in this disclosure?",
+          "What financial guidance is supported?",
+        ],
+      };
+      await persistFiling(filing, input.mode, method);
+      await run(
+        "UPDATE documents SET published_at=coalesce(published_at,?) WHERE id=?",
+        input.date,
+        id,
+      );
+      const extraction = await extractDocument(input.ticker, id).catch(() => ({
+        status: "provider_failed",
+        metrics: 0,
+        guidance: 0,
+      }));
+      return {
+        filing,
+        extraction,
+        discovered: 1,
+        inserted: prior ? 0 : 1,
+        duplicates: prior ? 1 : 0,
+      };
+    },
+    false,
+  );
 }
-export async function systemStatus() {
+export async function systemStatus(owner?: string) {
   return {
     database: "SQLite / D1",
     ai: providerStatus(),
@@ -621,8 +705,18 @@ export async function systemStatus() {
       "SELECT (SELECT count(*) FROM companies) companies,(SELECT count(*) FROM documents) documents,(SELECT count(*) FROM document_chunks) chunks,(SELECT count(*) FROM announcements) announcements,(SELECT count(*) FROM financial_metrics) metrics,(SELECT count(*) FROM guidance_statements) guidance",
     ),
     sync: await all(
-      "SELECT provider,ticker,last_success,last_attempt,next_retry,status,error FROM source_sync ORDER BY last_attempt DESC LIMIT 50",
+      "SELECT * FROM source_sync ORDER BY last_attempt DESC LIMIT 50",
     ),
+    indexing: await all(
+      "SELECT ticker,status,count(*) documents FROM discovery_candidates GROUP BY ticker,status",
+    ),
+    monitored_companies:
+      (
+        await one<{ n: number }>(
+          `SELECT count(DISTINCT ticker) n FROM portfolio_companies ${owner ? "WHERE owner=?" : ""}`,
+          ...(owner ? [owner] : []),
+        )
+      )?.n ?? 0,
     recent_runs: await all(
       "SELECT * FROM ingestion_runs ORDER BY started_at DESC LIMIT 20",
     ),
@@ -649,7 +743,7 @@ export async function persistComparisons(ticker: string, rows: Metric[]) {
       statements.push(
         db()
           .prepare(
-            "INSERT INTO metric_derivations(id,ticker,name,current_metric_id,base_metric_id,value,unit,formula,updated_at) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at",
+            "INSERT INTO metric_derivations(id,ticker,name,current_metric_id,base_metric_id,value,unit,formula,updated_at) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at WHERE metric_derivations.value<>excluded.value",
           )
           .bind(
             id,

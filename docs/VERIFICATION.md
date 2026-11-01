@@ -1,4 +1,44 @@
-# Local upgrade verification — 1 November 2026
+# Final reliability verification — 2 November 2026
+
+Same checkout and branch, starting from 9378c42. No push, production migration or deployment. Existing `.dev.vars` preserved. All results below are actual executions; the earlier build records follow as history.
+
+| Check | Actual final result |
+|---|---|
+| `npm test` | **57 passed**, 0 failed, 0 skipped; includes all prior domain/database/research/extraction tests plus financial years, signed capex, restatements/conflicting facts, source-event identity, materiality, late FTS, pagination, revisions, table parsing, qualifier guards and compatible guidance constraints |
+| `npm run typecheck` | Passed |
+| `npm run build` | Passed; final built Worker subsequently tested locally |
+| `npm run test:api` | **15 passed** on development localhost:5173 and **15 passed** on built-Worker localhost:5174; repeated runs are not counted as additional unique tests |
+| `npm run test:ingestion` | **1 passed**, authentic concurrent idempotent DMART imports |
+| `npm run test:reliability-api` | **4 passed**, authentic same-page Infosys results/dividend, NTPC full PUSH, cursor/direct lookup and verified company-name metadata |
+| `npm run test:gemini` | **3 real credentialed tests passed**, 0 skipped: existing Infosys facts, HCL forward guidance and annual-report risks; actual native model `gemini-3.5-flash-lite` |
+| `npm run test:cache` with explicit isolated localhost origin | **1 passed** on the final built Worker and a fresh test database: first answer, cached repeat, genuine HCL guidance import, fresh response, cached repeat, unrelated Infosys import, original cache still reusable |
+| Automated test total | **81 unique tests passed** across the scripts above; no skipped credentialed acceptance was counted as passed |
+| `py scripts/validate-financials.py` | Independently verified 18 market summaries and 8 original quarterly comparisons |
+| `py scripts/validate-dynamic.py` | Independently verified 9 actual consolidated DMART values and 6 QoQ/YoY calculations; missing PBT stayed unavailable |
+| `py scripts/validate-retrieved.py` | Independently verified 5 new Britannia quarter/year figures against original transcript page 7; operating profit was not relabelled EBITDA |
+| Migration generation | No remaining Drizzle schema changes after migrations/snapshots 0004 and 0005 |
+| Migration safety | All six migrations passed on an empty runtime database; original seeded/custom-owner tests passed; a copy of the real populated pre-upgrade database preserved all record counts across 11 existing data tables while applying 0004/0005 |
+| Existing database | Fresh backups before schema changes; 0004 and 0005 applied locally; all six journal entries present; `integrity_check=ok`, zero foreign-key violations |
+| Restart persistence | Actual stop/start verified saved watchlist, settings, dismissed notification, documents/chunks, financial metrics, guidance and the current-version cached answer. A deliberate earlier prompt-version change correctly forced a fresh answer; the stable-version restart then reused its cache |
+| Long retrieval | An isolated 2,605-chunk document retrieved the answer on page 2,605, with correct company/period/type boundaries and PAT/CFO synonyms; forward-target guidance kept the earlier source's real period |
+| Announcement scale | All 620 isolated fixture announcements reached via stable cursors with no duplicate IDs; oldest direct primary-key lookup worked |
+| PUSH | Registered NTPC official table yielded 80 dated primary links; bounded initial sync inserted two latest filings, stored cursor, produced source-backed capex priority, owner-filtered briefing and notifications. Subsequent check succeeded with zero inserts. Authentic M&A/rating/routine examples also imported |
+| Same-page events | Authentic Infosys results and proposed dividend from page 1 retained different IDs, both reached the briefing and alerts, and alternate dividend headlines reused the event ID. Fictional multi-event fixtures remain confined to isolated test databases |
+| PULL | Previously uncached Britannia resolved by name via NSE directory; original BSE transcripts indexed; actual Q1 FY2027 Gemini growth answer and separate commodity/pricing-risk answer passed validation with primary references |
+| Guidance | Actual app-level HCL FY2026 company CC guidance response succeeded; stored HCL FY2025 revised 4.5–5% target matches 4.7% actual. Superseded and missing/incompatible targets remain explicit |
+| Failure behaviour | Missing configuration, timeout, rate-limit, malformed JSON, wrong-company sources, unsupported numbers, directional contradictions and proposed/completed mismatches are tested. A rejected broad Britannia summary produced source fallback. The application hourly budget actually blocked later fresh requests, then normal-window renewal allowed successful final guidance/risk/new-company synthesis |
+| Mobile | At 375×812: five navigation sections, ordinary-name search, add/refresh/remove restoring original portfolio, read/unread restoring state, guidance, charts/units, financial evidence drawer and source links, rendered successful Britannia Gemini response. No horizontal page overflow observed. Screenshot saved below |
+| Secrets | Configured Gemini key/admin token values absent from tracked/untracked source artifacts and client build; original `.dev.vars` remains ignored and untouched |
+
+A stale API assertion expected exactly two material events forever. Importing the authentic Infosys dividend legitimately increased that count; the test now verifies the original results, priority separation and filters while permitting genuine additional events. All API tests passed after that correction.
+
+First uncached research can be slow while public documents and model calls complete; one built-Worker research integration request took about 70 seconds. Cached requests and independent dashboard APIs remain usable. OCR, exchange-wide completeness and an activated cloud scheduler are not claimed.
+
+Full changed-file/fix report: [RELIABILITY_UPGRADE.md](RELIABILITY_UPGRADE.md). Actual mobile proof: [Britannia answer](screenshots/reliability-mobile-gemini.jpg).
+
+---
+
+# Previous local upgrade verification — 1 November 2026
 
 Branch: `upgrade/sqlite-gemini-push-pull`. All upgrade work was tested on localhost. No GitHub push, hosted migration or deployment was performed.
 
