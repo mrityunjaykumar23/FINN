@@ -2,7 +2,7 @@
 
 FINN turns primary company disclosures and stored end-of-day observations into a portfolio briefing, evidence-grounded company research, and management guidance comparisons. No login or signup.
 
-This upgrade is on **`upgrade/sqlite-gemini-push-pull`**, for localhost review. It has not been pushed to GitHub or deployed. The [public repository](https://github.com/mrityunjaykumar23/FINN) and [public demo](https://finn-investment-intelligence-mrity.hazyanole2049.chatgpt.site) still describe the earlier published version.
+The production-readiness upgrade is on **`staging/enam-verification`**. An isolated [owner-private staging preview](https://finn-enam-staging-mrity.hazyanole2049.chatgpt.site) runs the existing Worker/D1 application. The [public repository](https://github.com/mrityunjaykumar23/FINN) and [public demo](https://finn-investment-intelligence-mrity.hazyanole2049.chatgpt.site) remain unchanged pending approval. No GitHub push has been made for this upgrade. See [staging verification](docs/STAGING_VERIFICATION_REPORT.md) and [staging operations](docs/STAGING_OPERATIONS.md).
 
 The final corrections and current acceptance results are in [FINAL_CORRECTIONS_REPORT.md](docs/FINAL_CORRECTIONS_REPORT.md). For a reproducible offline source demo, run `npm run demo:prepare` after migration and starting localhost; see [DEMO.md](docs/DEMO.md).
 
@@ -36,6 +36,7 @@ Copy `.env.example` to ignored `.dev.vars`, enter values locally, then restart t
 | `GEMINI_MODEL_REASONING` | Optional research model for guidance, risks, cash quality and complex narrative questions; defaults to the fast model |
 | `ADMIN_TOKEN` | Long random server secret for imports and batch jobs |
 | `FINN_TEST_URL` | Local integration-test origin, default `http://127.0.0.1:5173` |
+| `SITES_SCHEDULED_TOKEN` | Encrypted, Site-scoped service credential for the bounded unattended writer; never expose to the browser |
 
 Native `@google/genai` 2.32.0 is used. Real credentialed tests and complete localhost research succeeded with **gemini-3.5-flash-lite**. The model is configurable; availability and quotas depend on the key/project. Official [models](https://ai.google.dev/gemini-api/docs/models), [pricing](https://ai.google.dev/gemini-api/docs/pricing), [structured output](https://ai.google.dev/gemini-api/docs/structured-output), and [SDK](https://googleapis.github.io/js-genai/) were checked during implementation.
 
@@ -59,7 +60,7 @@ npm run job:local -- evaluate
 npm run job:local -- replay
 ```
 
-`sync` refreshes completed EOD observations for monitored tickers and evaluates all stored owners. Optional JSON `tickers` narrows the bounded job. `evaluate` checks current completed EOD sessions and material filings for stored owners; `replay` evaluates historical observations. These are callable background jobs independent of a browser. No cloud schedule, browser push or phone delivery has been activated.
+`sync` refreshes completed EOD observations for monitored tickers and evaluates all stored owners. Optional JSON `tickers` narrows the bounded job. `evaluate` checks current completed EOD sessions and material filings for stored owners; `replay` evaluates historical observations. These are callable background jobs independent of a browser. The isolated staging Site has an enabled cloud update schedule; its timing, authentication, verification and coverage limits are documented in [staging verification](docs/STAGING_VERIFICATION_REPORT.md). Browser push and phone delivery remain unavailable.
 
 Notifications persist read/unread/dismiss state per visitor. Re-evaluation cannot duplicate an event or erase its lifecycle. Settings affect newly evaluated signals; history remains accessible.
 

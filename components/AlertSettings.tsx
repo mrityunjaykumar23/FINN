@@ -370,9 +370,9 @@ export function AlertSettings({
           </div>
           <p className="coverage-note">
             <Info size={14} />
-            Alerts are evaluated when the briefing is opened or data is
-            ingested. This prototype has no continuous scheduler or phone
-            notification service.
+            Alerts are evaluated when the briefing is opened, data is ingested,
+            or a configured hosted update runs. Check source status for the last
+            successful update. Phone notifications are not available.
           </p>
         </form>
       )}
