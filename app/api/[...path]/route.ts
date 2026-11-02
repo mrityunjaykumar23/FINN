@@ -470,11 +470,12 @@ async function handle(request: Request) {
           "Source document is unavailable.",
         );
     } else if (path === "jobs/scheduled" && method === "POST") {
-      // Sites owner-private access is the service boundary for this opt-in staging writer.
-      // Public production must keep this flag disabled and use the existing admin endpoints.
+      // A dedicated service credential protects scheduled writes even on a public Site.
+      const jobToken = (env as unknown as Record<string, string>)
+        .SITES_SCHEDULED_TOKEN;
       if (
-        (env as unknown as Record<string, string>).PRIVATE_SCHEDULED_JOBS !==
-        "true"
+        !jobToken ||
+        request.headers.get("X-Finn-Job-Authorization") !== `Bearer ${jobToken}`
       )
         admin(request);
       await budget("scheduled-updates", 120, 3600000);

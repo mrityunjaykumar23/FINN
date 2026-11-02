@@ -157,3 +157,10 @@ test("saving alert rules does not regenerate historical or live notifications; r
   );
   assert.ok((await req("alerts", owner)).data.alerts.length > before.length);
 });
+
+test("scheduled writer rejects requests without its service or admin credential", async () => {
+  const r = await req("jobs/scheduled", cookie(), "POST", {
+    phase: "evaluate",
+  });
+  assert.equal(r.status, 403);
+});

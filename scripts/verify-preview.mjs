@@ -24,6 +24,8 @@ async function api(
   };
   if (config.sitesToken)
     headers["OAI-Sites-Authorization"] = `Bearer ${config.sitesToken}`;
+  if (config.sitesToken && path === "jobs/scheduled")
+    headers["X-Finn-Job-Authorization"] = `Bearer ${config.sitesToken}`;
   if (admin) headers.Authorization = `Bearer ${config.adminToken}`;
   const r = await fetch(config.base + "/api/" + path, {
     method,
