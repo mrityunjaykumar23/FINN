@@ -1,4 +1,5 @@
-import { financialLabelSupported } from "./financial-labels";
+import { extractionOutcome, publicationMetadata } from "./pipeline-state";
+import { financialLabelSupported, revenueContext } from "./financial-labels";
 import {
   completedSessions,
   exchangeDate,
@@ -113,6 +114,74 @@ async function annotateSeed() {
       d.id,
     );
 }
+async function reconcileStagingAudit() {
+  if (
+    !(await one("SELECT value FROM meta WHERE key='source-context-review-v1'"))
+  ) {
+    const affected = await all<{
+      id: string;
+      document_id: string;
+      page: number;
+      evidence_text: string;
+    }>(
+      "SELECT m.id,m.document_id,m.page,m.evidence_text FROM financial_metrics m WHERE m.name='Revenue' AND m.verification_status='unverified' AND EXISTS (SELECT 1 FROM extraction_audit a WHERE a.document_id=m.document_id AND a.method='definition_review_v4' AND instr(a.reason,m.id)>0)",
+    );
+    for (const m of affected) {
+      const doc = await getDocument(m.document_id),
+        page = doc?.pages.find((p) => p.page === m.page);
+      const context = page
+        ? revenueContext(page.text, m.evidence_text)
+        : undefined;
+      if (!context) continue;
+      await db().batch([
+        db()
+          .prepare(
+            "UPDATE financial_metrics SET evidence_text=?,verification_status='source_checked',extraction_method='source_context_review_v1' WHERE id=?",
+          )
+          .bind(context, m.id),
+        db()
+          .prepare(
+            "INSERT INTO extraction_audit(id,document_id,method,status,reason,created_at) VALUES (?,?,?,?,?,?)",
+          )
+          .bind(
+            crypto.randomUUID(),
+            m.document_id,
+            "source_context_review_v1",
+            "restored",
+            JSON.stringify({
+              metric_id: m.id,
+              original_excerpt: m.evidence_text,
+              note: "Exact original quote expanded to adjacent revenue heading without crossing another financial measure.",
+            }),
+            new Date().toISOString(),
+          ),
+      ]);
+    }
+    await run(
+      "INSERT OR IGNORE INTO meta(key,value) VALUES ('source-context-review-v1','complete')",
+    );
+  }
+  if (await one("SELECT value FROM meta WHERE key='staging-audit-v1'")) return;
+  const rows = await all<{ id: string; payload: string }>(
+    "SELECT id,payload FROM announcements",
+  );
+  for (const row of rows) {
+    const f = JSON.parse(row.payload);
+    const updated = { ...f, ...publicationMetadata(f) };
+    await run(
+      "UPDATE announcements SET published_at=?,payload=? WHERE id=?",
+      updated.published_at,
+      JSON.stringify(updated),
+      row.id,
+    );
+  }
+  await run(
+    "UPDATE document_jobs SET status='manual_required',extraction_status='legacy_requires_review',error='Prior completion did not establish verified financial output; source document retained.' WHERE status='complete' AND type IN ('results','annual_report','presentation','transcript') AND document_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM financial_metrics m WHERE m.document_id=document_jobs.document_id AND m.verification_status<>'unverified') AND NOT EXISTS (SELECT 1 FROM guidance_statements g WHERE g.document_id=document_jobs.document_id AND g.verification_status<>'unverified')",
+  );
+  await run(
+    "INSERT OR IGNORE INTO meta(key,value) VALUES ('staging-audit-v1','complete')",
+  );
+}
 let initialization: Promise<void> | null = null;
 export async function initialize() {
   if (initialization) return initialization;
@@ -189,6 +258,7 @@ export async function initialize() {
       );
     }
     if (await one("SELECT value FROM meta WHERE key = ?", seed.version)) {
+      await reconcileStagingAudit();
       await annotateSeed();
       await seedGuidance(seed.guidance);
       return;
@@ -332,6 +402,7 @@ export async function initialize() {
       await db().batch(statements.slice(i, i + 35));
     for (const filing of seed.events)
       await persistFiling(filing, "historical", "human_reviewed");
+    await reconcileStagingAudit();
     await seedGuidance(seed.guidance);
     await annotateSeed();
     await run(
@@ -1319,14 +1390,38 @@ async function discoverDocumentsWork(
         c.url,
       );
       await run(
-        "UPDATE document_jobs SET status='complete',document_id=?,updated_at=? WHERE ticker=? AND url=?",
+        "UPDATE document_jobs SET status='extracting',document_id=?,updated_at=? WHERE ticker=? AND url=?",
         id,
         new Date().toISOString(),
         ticker,
         c.url,
       );
       indexedCount++;
-      await extractDocument(ticker, id);
+      const extraction = await extractDocument(ticker, id).catch(() => ({
+        status: "extraction_failed",
+        error_code: "extraction_exception",
+      }));
+      const outcome = extractionOutcome(extraction, c.type);
+      await run(
+        "UPDATE document_jobs SET status=?,extraction_status=?,extraction_result=?,error=?,next_retry=?,updated_at=? WHERE ticker=? AND url=?",
+        outcome.status,
+        extraction.status,
+        JSON.stringify(extraction),
+        outcome.error,
+        outcome.status === "extraction_failed"
+          ? new Date(Date.now() + 5 * 60000).toISOString()
+          : null,
+        new Date().toISOString(),
+        ticker,
+        c.url,
+      );
+      if (outcome.status !== "complete") {
+        failed++;
+        limitations.push(
+          outcome.error ??
+            "Financial extraction requires review; original text is indexed.",
+        );
+      }
     } catch (e) {
       failed++;
       const detail =

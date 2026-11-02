@@ -1,3 +1,4 @@
+import { processIndependentCandidates } from "../pipeline-state";
 import { all, one, run, sha, ApiError, db } from "../../db/repository";
 import {
   safeSourceUrl,
@@ -111,14 +112,15 @@ export async function syncAnnouncements(
               duplicates = 0,
               failures = 0,
               cursor: string | undefined;
-            for (const c of options.stage === "discovery" ? [] : queue) {
-              try {
+            await processIndependentCandidates(
+              options.stage === "discovery" ? [] : queue,
+              async (c) => {
                 if (c.type === "annual_report" || c.type === "transcript") {
                   await run(
                     "UPDATE discovery_candidates SET processing_status='review',detail='Report/transcript requires event review; not treated as a new event automatically.' WHERE id=?",
                     c.id,
                   );
-                  continue;
+                  return;
                 }
                 const id = await ingestPdf(
                     ticker,
@@ -135,7 +137,7 @@ export async function syncAnnouncements(
                     id,
                     c.id,
                   );
-                  continue;
+                  return;
                 }
                 for (const event of events) {
                   const imported = await importFiling({
@@ -162,7 +164,8 @@ export async function syncAnnouncements(
                   c.id,
                 );
                 cursor = c.external_id;
-              } catch (e) {
+              },
+              async (c, e) => {
                 failures++;
                 await run(
                   "UPDATE discovery_candidates SET attempts=attempts+1,processing_status=CASE WHEN attempts>=2 THEN 'review' ELSE 'failed' END,next_retry=?,detail=? WHERE id=?",
@@ -172,9 +175,8 @@ export async function syncAnnouncements(
                     : "original_source_unavailable",
                   c.id,
                 );
-                break;
-              }
-            }
+              },
+            );
             const counts = await one<{ pending: number; manual: number }>(
               "SELECT sum(processing_status IN ('pending','failed')) pending,sum(processing_status='review') manual FROM discovery_candidates WHERE ticker=? AND provider=?",
               ticker,

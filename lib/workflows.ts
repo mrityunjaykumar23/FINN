@@ -1,3 +1,4 @@
+import { publicationMetadata } from "./pipeline-state";
 import announcementSources from "../data/announcement-sources.json";
 import { quarterlyComparisons, selectMetric } from "./periods";
 import {
@@ -52,6 +53,7 @@ export async function persistFiling(
       "invalid_evidence",
       "A matching company source and indexed evidence page are required.",
     );
+  f = { ...f, ...publicationMetadata(f) };
   const signature = f.event_signature ?? `legacy:${f.id}`;
   const hash = await sha(`${f.ticker}:${doc.hash}:${signature}`),
     score = rank(f, defaultSettings).score;
@@ -718,7 +720,12 @@ export async function importFiling(input: {
         ticker: input.ticker,
         headline: input.headline,
         date: input.date,
-        date_precision: "Source-supplied publication date; time not verified",
+        date_precision: publicationMetadata({
+          date: input.date,
+          publication_precision: input.publication_precision,
+          source_timestamp: input.source_timestamp,
+          publication_timezone: input.publication_timezone,
+        }).date_precision,
         category: rule.category,
         summary,
         why: why + " " + materiality.reasons.join(" "),

@@ -89,7 +89,7 @@ for (let call = 0; call < maxCalls; call++) {
     action === "retry" &&
     result.results?.length &&
     result.counts?.some(
-      (c) => ["pending", "failed"].includes(c.status) && c.n > 0,
+      (c) => ["pending", "failed", "extraction_failed"].includes(c.status) && c.n > 0,
     )
   )
     state.complete = false;

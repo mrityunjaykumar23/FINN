@@ -137,3 +137,23 @@ test("cross-origin writes and oversized streamed JSON are controlled errors", as
   });
   assert.equal(r.status, 413);
 });
+
+test("saving alert rules does not regenerate historical or live notifications; replay stays explicit", async () => {
+  const owner = cookie();
+  await req("portfolio", owner);
+  const before = (await req("alerts", owner)).data.alerts;
+  const settings = (await req("alerts/settings", owner)).data;
+  const saved = await req("alerts/settings", owner, "PUT", {
+    ...settings,
+    price_threshold: 0.1,
+    volume_multiplier: 1,
+    min_priority: 0,
+  });
+  assert.equal(saved.status, 200);
+  assert.deepEqual((await req("alerts", owner)).data.alerts, before);
+  assert.equal(
+    (await req("alerts/evaluate?mode=historical", owner, "POST", {})).status,
+    200,
+  );
+  assert.ok((await req("alerts", owner)).data.alerts.length > before.length);
+});

@@ -1,3 +1,4 @@
+import { scheduledStep } from "@/lib/scheduled-jobs";
 import { prepareDemo } from "@/lib/demo";
 import { processDocumentJobs } from "@/lib/ingestion/document-jobs";
 import { syncAnnouncements } from "@/lib/ingestion/announcements";
@@ -221,11 +222,11 @@ async function handle(request: Request) {
         owner,
         JSON.stringify(input),
       );
-      await evaluateAlerts(owner, "historical");
-      await evaluateAlerts(owner, "live");
+      // Saving preferences never replays historical events or creates retrospective notifications.
       result = {
         settings: input,
-        message: "Alert rules saved and latest stored sessions evaluated.",
+        message:
+          "Alert rules saved. Open a briefing or explicitly evaluate alerts to apply them.",
       };
     } else if (path === "digest" && method === "GET") {
       if (url.searchParams.has("limit"))
@@ -468,6 +469,29 @@ async function handle(request: Request) {
           "document_not_found",
           "Source document is unavailable.",
         );
+    } else if (path === "jobs/scheduled" && method === "POST") {
+      // Sites owner-private access is the service boundary for this opt-in staging writer.
+      // Public production must keep this flag disabled and use the existing admin endpoints.
+      if (
+        (env as unknown as Record<string, string>).PRIVATE_SCHEDULED_JOBS !==
+        "true"
+      )
+        admin(request);
+      await budget("scheduled-updates", 120, 3600000);
+      const input = z
+        .object({
+          phase: z.enum([
+            "market",
+            "discovery",
+            "ingestion",
+            "evaluate",
+            "documents",
+          ]),
+          after: z.string().max(32).optional(),
+          owner_after: z.string().max(100).optional(),
+        })
+        .parse(parsedBody);
+      result = { phase: input.phase, result: await scheduledStep(input) };
     } else if (path === "admin/ingest-announcements" && method === "POST") {
       admin(request);
       const input = z
@@ -482,6 +506,11 @@ async function handle(request: Request) {
           reprocess: z.boolean().default(false),
           event_quote: z.string().min(20).max(20000).optional(),
           exchange_filing_id: z.string().min(1).max(500).optional(),
+          publication_precision: z
+            .enum(["date", "company_recorded_datetime"])
+            .optional(),
+          publication_timezone: z.string().max(64).optional(),
+          source_timestamp: z.string().datetime({ offset: true }).optional(),
         })
         .refine(
           (v) => !!v.document_id || !!v.url,

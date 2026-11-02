@@ -57,6 +57,13 @@
       "when": 1793596933061,
       "tag": "0007_wandering_thor",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1793613887560,
+      "tag": "0008_orange_winter_soldier",
+      "breakpoints": true
     }
   ]
 }

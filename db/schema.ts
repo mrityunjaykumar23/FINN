@@ -502,6 +502,8 @@ export const documentJobs = sqliteTable(
     attempts: integer("attempts").notNull().default(0),
     next_retry: text("next_retry"),
     error: text("error"),
+    extraction_status: text("extraction_status"),
+    extraction_result: text("extraction_result"),
     document_id: text("document_id").references(() => documents.id),
     created_at: text("created_at").notNull(),
     updated_at: text("updated_at").notNull(),

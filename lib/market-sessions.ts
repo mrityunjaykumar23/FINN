@@ -45,6 +45,11 @@ export type DailyObservation = Point & {
   high: number;
   low: number;
 };
+export const isExchangeTradingDate = (date: string) => {
+  if (calendar.special.includes(date)) return true;
+  const d = new Date(date + "T12:00:00+05:30").getUTCDay();
+  return d !== 0 && d !== 6 && !calendar.holidays.includes(date);
+};
 export function completedSessions(
   rows: DailyObservation[],
   meta: MarketMeta,
@@ -62,14 +67,9 @@ export function completedSessions(
     p.high >= Math.max(p.open, p.close, p.low) &&
     p.low <= Math.min(p.open, p.close) &&
     p.volume >= 0;
-  const trading = (date: string) => {
-    if (calendar.special.includes(date)) return true;
-    const d = new Date(date + "T12:00:00+05:30").getUTCDay();
-    return d !== 0 && d !== 6 && !calendar.holidays.includes(date);
-  };
   const regular = meta.currentTradingPeriod?.regular;
   const points = rows
-    .filter((p) => valid(p) && p.date <= today && trading(p.date))
+    .filter((p) => valid(p) && p.date <= today && isExchangeTradingDate(p.date))
     .filter((p) => {
       if (p.date < today) return true;
       if (
