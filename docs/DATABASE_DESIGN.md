@@ -12,6 +12,11 @@ The database is SQLite locally and SQLite-compatible D1 in the retained hosted a
 5. `0004_flimsy_deathbird.sql`: separate event signatures/exchange identities, stable feed index, company revision counters and triggers, discovery candidates, extraction audit, restatement metadata, and source-sync counts/cursor. Existing event IDs are retained.
 6. `0005_parallel_outlaw_kid.sql`: compatible-actual lookup index and database triggers refusing incomparable guidance/derived metric references.
 
+7. `0006_stiff_enchantress.sql`: source discovery/processing provenance, source/run progress details, retry/manual-review counters and durable bounded `document_jobs`.
+8. `0007_wandering_thor.sql`: retain the exact optional company-recorded source timestamp independently of the calendar publication date.
+
+A one-time definition review v4 retains earlier Gemini Revenue/Operating margin/Borrowings rows as unverified, with an audit record, when their own accepted excerpt does not establish that accounting label. Total income is not revenue, EBITDA margin is not operating margin, and gross debt is not automatically borrowings. No source/history record is deleted.
+
 The migration journal and Drizzle snapshots are tracked. Do not modify already applied SQL. No financial records, watchlists or preferences are reset by migration.
 
 ## Backup and recovery
@@ -43,3 +48,7 @@ FTS5 is compatible with local SQLite/D1 and tested. A bounded lexical fallback r
 Event payloads may retain `canonical_event_id` for historical aliases; their records and alert references remain intact and direct IDs remain available. Normal feeds and future alert evaluation use canonical records. Explicit event quotes distinguish same-category events on a shared page; categories distinguish results/dividend/management events in one document.
 
 Backups were taken before both reliability migrations. A copy of the latest populated pre-upgrade database preserved all counts across companies, documents/chunks, metrics, owners, portfolios, settings, announcements, alerts, guidance and caches while applying 0004/0005, with zero foreign-key violations. Empty and original seeded/custom-owner databases also ran the full migration sequence.
+
+## Final corrections verification
+
+Backups preceded 0006/0007. Applying both to a copy of the populated pre-0006 database preserved counts across all 31 existing tables (including 194 owners, 30 documents and 137 financial metric history rows), with `integrity_check=ok` and zero FK violations. A `VACUUM INTO` snapshot reopened successfully. Empty-database and original seeded/custom-owner migration tests also pass. An actual localhost restart preserves watchlists, settings, dismissed alerts, documents/chunks, metrics, guidance, sync ledgers, queued document work and successful research caches. Test databases and snapshots are ignored; none replace the working database.

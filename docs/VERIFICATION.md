@@ -1,3 +1,9 @@
+# Final corrections verification — 2 November 2026
+
+See [FINAL_CORRECTIONS_REPORT.md](FINAL_CORRECTIONS_REPORT.md) for the current implementation, 94 passing automated tests, actual external-source checks, Gemini execution, migration/recovery/restart evidence and remaining limitations. The original design and 18-company starter portfolio are retained; current work remains local and unpublished.
+
+The previous upgrade's verification record is retained below as historical evidence, not a substitute for the current report.
+
 # Final reliability verification — 2 November 2026
 
 Same checkout and branch, starting from 9378c42. No push, production migration or deployment. Existing `.dev.vars` preserved. All results below are actual executions; the earlier build records follow as history.

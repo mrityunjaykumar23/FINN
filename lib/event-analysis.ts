@@ -1,4 +1,4 @@
-import { classify, type Category } from "./domain.ts";
+import { classify, type Category, type Metric } from "./domain.ts";
 
 export const normalizeEvidence = (text: string) =>
   text
@@ -34,9 +34,9 @@ export function eventEvidence(
       );
     return exactQuote;
   }
-  const sentences = [...text.matchAll(/[^.;]+(?:[.;]|$)/g)].filter((m) =>
-    (patterns[category] ?? /./).test(m[0]),
-  );
+  const sentences = [
+    ...text.matchAll(/[\s\S]+?(?:;|\.(?=\s+[A-Z])|\n\s*\n|$)/g),
+  ].filter((m) => (patterns[category] ?? /./).test(m[0]));
   if (!sentences.length) return text;
   const first = sentences[0],
     last = sentences.at(-1)!;
@@ -51,10 +51,24 @@ export type EventAttributes = {
   capacities: { value: number; unit: string; quote: string }[];
   rating_action?: string;
   rating_labels: string[];
-  magnitude_status: "verified_absolute" | "unknown";
+  magnitude_status: "verified_relative" | "verified_absolute" | "unknown";
+  relative_reference?: {
+    metric_id: string;
+    document_id: string;
+    page: number;
+    period: string;
+    basis: string;
+    denominator_crore: number;
+    percent: number;
+    amount_quote: string;
+  };
   limitations: string[];
 };
-export function analyzeMateriality(category: Category, text: string) {
+export function analyzeMateriality(
+  category: Category,
+  text: string,
+  context?: { ticker: string; date: string; metrics: Metric[] },
+) {
   const amounts = [
     ...text.matchAll(
       /(?:₹|INR|Rs\.?)\s*([\d,]+(?:\.\d+)?)\s*(crore|cr\.?|million|billion|lakh)\b/gi,
@@ -108,10 +122,16 @@ export function analyzeMateriality(category: Category, text: string) {
         results: 28,
         "M&A": 30,
         litigation: 28,
-        management_change: position ? 32 : 22,
+        management_change: position
+          ? /resign/i.test(action ?? "")
+            ? 36
+            : 27
+          : /resign/i.test(action ?? "")
+            ? 23
+            : 16,
         credit_rating: /downgrad/i.test(action ?? "")
           ? 32
-          : /reaffirm/i.test(action ?? "")
+          : /reaffirm|affirm/i.test(action ?? "")
             ? 10
             : 23,
         capex: 22,
@@ -159,6 +179,98 @@ export function analyzeMateriality(category: Category, text: string) {
       "Amounts are absolute disclosed figures; no company-relative size or price effect is inferred.",
     ],
   };
+  // Use a transaction-specific amount, never the largest unrelated monetary figure.
+  const role =
+    category === "M&A"
+      ? /consideration|acquisition (?:cost|price)|transaction value/i
+      : category === "capex"
+        ? /capital expenditure|capex|project cost|investment (?:of|amount)/i
+        : category === "litigation"
+          ? /penalty|fine|demand/i
+          : null;
+  const scoped = role
+    ? amounts.filter((a) =>
+        text
+          .split(/\n|;|\.(?=\s+[A-Z])/)
+          .some((s) => s.includes(a.quote) && role.test(s)),
+      )
+    : [];
+  const allowed =
+    category === "M&A"
+      ? ["Revenue", "Assets"]
+      : category === "capex"
+        ? ["Capital expenditure"]
+        : category === "litigation"
+          ? ["PAT", "Equity"]
+          : [];
+  const factors: Record<string, number> = {
+    "INR crore": 1,
+    "INR lakh": 0.01,
+    "INR million": 0.1,
+    "INR billion": 100,
+  };
+  const refs =
+    context?.metrics
+      .filter(
+        (m) =>
+          m.ticker === context.ticker &&
+          allowed.includes(m.name) &&
+          m.value !== null &&
+          m.value > 0 &&
+          factors[m.unit] &&
+          /^FY\d{4}$/.test(m.period) &&
+          /^(Consolidated|Standalone) reported INR$/.test(m.basis) &&
+          ["source_checked", "verified", "reviewed"].includes(
+            m.verification_status ?? "",
+          ) &&
+          !!m.evidence_text &&
+          !!m.published_at &&
+          m.published_at.slice(0, 10) <= context.date &&
+          Number(m.period.slice(2)) >= Number(context.date.slice(0, 4)) - 2,
+      )
+      .sort(
+        (a, b) =>
+          b.period.localeCompare(a.period) ||
+          allowed.indexOf(a.name) - allowed.indexOf(b.name),
+      ) ?? [];
+  if (
+    scoped.length === 1 &&
+    refs.length &&
+    !/USD|US\$|EUR/i.test(scoped[0].quote)
+  ) {
+    const r = refs[0],
+      denominator = r.value! * factors[r.unit],
+      amount = scoped[0].value * factors[scoped[0].unit],
+      percent = (100 * amount) / denominator;
+    attributes.relative_reference = {
+      metric_id: r.id,
+      document_id: r.document_id,
+      page: r.page,
+      period: r.period,
+      basis: r.basis,
+      denominator_crore: denominator,
+      percent,
+      amount_quote: scoped[0].quote,
+    };
+    attributes.magnitude_status = "verified_relative";
+    attributes.limitations = [
+      "Relative scale compares an explicit event amount with a cited annual company measure; it does not predict market price impact.",
+    ];
+    magnitude =
+      percent >= 50
+        ? 25
+        : percent >= 20
+          ? 22
+          : percent >= 5
+            ? 17
+            : percent >= 1
+              ? 10
+              : 5;
+    reasons[1] = `${scoped[0].quote} is ${percent.toFixed(2)}% of ${r.period} ${r.basis} ${r.name} (metric ${r.id}, source page ${r.page}).`;
+  } else if (role)
+    attributes.limitations.push(
+      "No unique transaction amount and compatible, dated annual company reference; absolute/unknown scale retained.",
+    );
   return { severity, magnitude, novelty: 5, evidence: 9, attributes, reasons };
 }
 export function categoryForEvent(headline: string, text: string) {

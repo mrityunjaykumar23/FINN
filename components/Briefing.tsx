@@ -59,11 +59,61 @@ export function Briefing({
     [loading, setLoading] = useState(true),
     [error, setError] = useState(""),
     [retry, setRetry] = useState(0),
-    [routine, setRoutine] = useState(false);
+    [routine, setRoutine] = useState(false),
+    [paging, setPaging] = useState(false);
+  const windowParams = () => {
+    const p = new URLSearchParams({
+      mode,
+      days: days === "custom" ? "7" : days,
+    });
+    if (company) p.set("ticker", company);
+    if (category) p.set("category", category);
+    if (days === "custom") {
+      p.set("start", customStart);
+      p.set("end", customEnd);
+    }
+    return p;
+  };
+  async function more(side: "events" | "routine") {
+    const cursor =
+      side === "events" ? digest?.next_cursor : digest?.next_routine_cursor;
+    if (!cursor) return;
+    setPaging(true);
+    setError("");
+    try {
+      const p = windowParams();
+      p.set(side === "events" ? "cursor" : "routine_cursor", cursor);
+      const next = await api<Digest>(`digest?${p}`);
+      setDigest((old) =>
+        old
+          ? {
+              ...old,
+              [side]: [
+                ...old[side],
+                ...next[side].filter(
+                  (x) => !old[side].some((y) => y.id === x.id),
+                ),
+              ],
+              ...(side === "events"
+                ? { next_cursor: next.next_cursor }
+                : { next_routine_cursor: next.next_routine_cursor }),
+            }
+          : next,
+      );
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setPaging(false);
+    }
+  }
   useEffect(() => {
     const abort = new AbortController();
-    setLoading(true);
-    setError("");
+    queueMicrotask(() => {
+      if (!abort.signal.aborted) {
+        setLoading(true);
+        setError("");
+      }
+    });
     const params = new URLSearchParams({
       mode,
       days: days === "custom" ? "7" : days,
@@ -108,7 +158,11 @@ export function Briefing({
           <strong>
             {mode === "historical"
               ? "22 April 2025"
-              : date(new Date().toISOString().slice(0, 10))}
+              : date(
+                  new Intl.DateTimeFormat("en-CA", {
+                    timeZone: "Asia/Kolkata",
+                  }).format(new Date()),
+                )}
           </strong>
           <small>Indian markets · End of day</small>
         </div>
@@ -163,7 +217,7 @@ export function Briefing({
           <strong>
             {loading
               ? "—"
-              : String(digest?.events.length ?? 0).padStart(2, "0")}
+              : String(digest?.important_count ?? 0).padStart(2, "0")}
             <span className="stat-dot amber" />
           </strong>
           <small>prioritised developments</small>
@@ -183,18 +237,28 @@ export function Briefing({
           <strong>
             {loading
               ? "—"
-              : String(digest?.routine.length ?? 0).padStart(2, "0")}
+              : String(digest?.routine_count ?? 0).padStart(2, "0")}
             <ListFilter size={20} />
           </strong>
           <small>lower-priority updates</small>
         </div>
         <div className="coverage-stat">
-          <span>FILING COVERAGE</span>
+          <span>SUCCESSFULLY CHECKED</span>
           <strong>
             {digest?.covered_companies ?? "—"}
             <small>/ {companies.length}</small>
             <ShieldCheck size={20} />
           </strong>
+          <small>
+            {digest?.monitored_companies ?? 0} monitored ·{" "}
+            {digest?.companies_with_events ?? 0} with matching filings
+          </small>
+          <small>
+            Last successful check:{" "}
+            {digest?.last_successful_announcement_check
+              ? date(digest.last_successful_announcement_check)
+              : "not established in this workspace"}
+          </small>
           <button onClick={onSources}>
             Know the limitations <ArrowUpRight size={11} />
           </button>
@@ -205,7 +269,7 @@ export function Briefing({
           <div className="section-heading">
             <h2>
               Your intelligence briefing
-              <span className="count-pill">{digest?.events.length ?? 0}</span>
+              <span className="count-pill">{digest?.important_count ?? 0}</span>
             </h2>
             <span className="muted">Ranked by relevance</span>
           </div>
@@ -268,6 +332,15 @@ export function Briefing({
                   }
                 />
               ))}
+              {digest?.next_cursor && (
+                <button
+                  className="secondary-button"
+                  disabled={paging}
+                  onClick={() => void more("events")}
+                >
+                  {paging ? "Loading…" : "View more prioritised filings"}
+                </button>
+              )}
               {!!digest?.market_alerts.length && (
                 <section className="market-signals">
                   <div className="section-heading">
@@ -325,7 +398,7 @@ export function Briefing({
                   <div>
                     <strong>The noise, neatly tucked away.</strong>
                     <span>
-                      {digest?.routine.length ?? 0} lower-priority updates ·
+                      {digest?.routine_count ?? 0} lower-priority updates ·
                       available when you need them
                     </span>
                   </div>
@@ -351,6 +424,15 @@ export function Briefing({
                     ) : (
                       <p>No lower-priority updates in the selected window.</p>
                     )}
+                    {digest?.next_routine_cursor && (
+                      <button
+                        className="secondary-button"
+                        disabled={paging}
+                        onClick={() => void more("routine")}
+                      >
+                        {paging ? "Loading…" : "View more routine filings"}
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -362,6 +444,12 @@ export function Briefing({
               ? "A verified replay, not a complete exchange feed. Date-only disclosures use calendar-day windows."
               : "Live disclosures appear after authorised ingestion. Empty coverage does not mean no filings occurred."}
           </p>
+          {!!digest?.unavailable_source_companies.length && (
+            <p className="coverage-note">
+              Unavailable announcement sources:{" "}
+              {digest.unavailable_source_companies.join(", ")}.
+            </p>
+          )}
         </div>
         <aside className="right-rail">
           <div className="promise-preview">
@@ -437,7 +525,10 @@ export function Briefing({
               View all {companies.length} companies <ArrowRight size={13} />
             </button>
             <p>
-              Historical closes ·{" "}
+              {mode === "historical"
+                ? "Historical closes"
+                : "Completed EOD closes"}{" "}
+              ·{" "}
               {mode === "historical" ? "22 Apr 2025" : "latest stored session"}
               <br />
               Percentage moves use adjusted prices.

@@ -1,3 +1,27 @@
 [
-  {"ticker":"NTPC.NS","provider":"official_html_table","url":"https://ntpc.co.in/investors/disclosures-announcements/corporate-announcements?field_financial_year_target_id=All","officialHost":"ntpc.co.in","note":"Original public company disclosure table. First sync samples the two latest accessible filings; earlier history is not claimed complete."}
+  {
+    "ticker": "NTPC.NS",
+    "provider": "official_html_table",
+    "url": "https://ntpc.co.in/investors/disclosures-announcements/corporate-announcements?field_financial_year_target_id=All",
+    "officialHost": "ntpc.co.in",
+    "note": "Original dated NTPC disclosure table. Bounded discovery and durable pending work expose historical backlog without skipping it.",
+    "layout": "ntpc_table"
+  },
+  {
+    "ticker": "SBIN.NS",
+    "provider": "official_sbi_table",
+    "layout": "sbi_table",
+    "url": "https://sbi.bank.in/web/corporate-governance/3rd-quarter-2026-27",
+    "officialHost": "sbi.bank.in",
+    "scope_end": "2026-12-31",
+    "note": "Original SBI disclosure table for October-December 2026. Quarterly page registration must be reviewed at the next quarter; no wider historical coverage is claimed."
+  },
+  {
+    "ticker": "MARUTI.NS",
+    "provider": "official_maruti_cms",
+    "layout": "maruti_cms",
+    "url": "https://www.marutisuzuki.com/graphql/execute.json/msil-platform/CorporateDocumentsByPath;path=/content/dam/msil/corporate/events/content-fragments",
+    "officialHost": "marutisuzuki.com",
+    "note": "Public structured endpoint used by Maruti investor events. Explicit CMS date fields are retained; undated documents require review. CMS dates are not asserted to be exchange broadcast timestamps."
+  }
 ]

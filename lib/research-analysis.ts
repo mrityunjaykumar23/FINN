@@ -12,6 +12,7 @@ import {
   compatibleMetrics,
 } from "./periods.ts";
 export type CalculatedFinding = {
+  evidence_type?: "reported" | "calculated";
   text: string;
   sources: { document_id: string; page: number }[];
 };
@@ -30,7 +31,7 @@ export function calculateFindings(
     ),
     findings: CalculatedFinding[] = [];
   const money = (v: number) =>
-    new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(v);
+    new Intl.NumberFormat("en-IN", { maximumFractionDigits: 6 }).format(v);
   const amount = (m: Metric) =>
     m.unit === "INR crore"
       ? `₹${money(m.value!)} crore`
@@ -51,7 +52,7 @@ export function calculateFindings(
     const relevant = guidance.filter(
       (g) =>
         g.ticker === ticker &&
-        !g.superseded &&
+        (!g.superseded || /original|revis|supersed|historical/.test(q)) &&
         (!requestedPeriod || g.period === requestedPeriod) &&
         (!/margin/.test(q) || g.metric === "Operating margin") &&
         (!/revenue/.test(q) || g.metric === "Revenue growth"),
@@ -60,11 +61,34 @@ export function calculateFindings(
       const result = compareGuidance(g);
       if (result.variance !== null)
         findings.push({
-          text: `${g.period} ${g.metric.toLowerCase()}: ${result.explanation} ${g.qualifier}`,
+          text: `${g.period} ${g.metric.toLowerCase()} (${g.superseded ? "original, superseded" : g.revised ? "revised" : "target"}): ${result.explanation} ${g.qualifier}`,
           sources: [
             { document_id: g.guidance_document, page: g.guidance_page },
             { document_id: g.actual_document, page: g.actual_page },
           ],
+        });
+    }
+  }
+  if (
+    /figures|snapshot|report.*(?:ebitda|profit)|consolidated.*(?:revenue|profit)/i.test(
+      q,
+    )
+  ) {
+    const latest = requestedPeriod ?? sortPeriods(rows.map((m) => m.period))[0];
+    for (const name of [
+      "Revenue",
+      "Total income",
+      "EBITDA",
+      "PAT",
+      "Debt",
+      "Borrowings",
+    ]) {
+      const m = latest ? selectMetric(rows, name, latest) : undefined;
+      if (m && m.value !== null)
+        findings.push({
+          text: `${m.period} ${m.name}: ${amount(m)} (${m.basis}).`,
+          sources: [source(m)],
+          evidence_type: "reported",
         });
     }
   }

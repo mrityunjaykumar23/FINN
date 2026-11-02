@@ -73,6 +73,10 @@ export type Filing = {
   event_quote?: string;
   event_scope?: "explicit" | "page_category";
   canonical_event_id?: string;
+  source_provider?:string;
+  publication_precision?:string;
+  publication_timezone?:string;
+  published_at?:string;
   materiality_attributes?: import("./event-analysis.ts").EventAttributes;
   materiality_reasons?: string[];
 };
@@ -216,6 +220,7 @@ export function classify(text: string): {
   rationale: string;
 } {
   const rules: [Category, RegExp][] = [
+    ['unclassified',/(?:intimation|notice).{0,40}board meeting|board meeting.{0,40}(?:consider|scheduled)/i],
     [
       "management_change",
       /(?:ceo|cfo|chief executive|chief financial|managing director|director).{0,60}(?:resign|appoint|retir)|(?:resign|appoint).{0,60}(?:ceo|cfo|director)/i,
@@ -416,26 +421,6 @@ export function retrieve<
   filters: { period?: string; type?: string } = {},
   limit = 5,
 ) {
-  const query = question
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter(
-      (w) =>
-        w.length > 2 &&
-        ![
-          "the",
-          "what",
-          "how",
-          "has",
-          "was",
-          "were",
-          "does",
-          "and",
-          "for",
-          "company",
-          "its",
-        ].includes(w),
-    );
   const terms = retrievalTerms(question);
   return items
     .filter(

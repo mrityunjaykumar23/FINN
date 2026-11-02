@@ -46,7 +46,9 @@ export default function Dashboard() {
   }, [toast]);
   useEffect(() => {
     let active = true;
-    setLoading(true);
+    queueMicrotask(() => {
+      if (active) setLoading(true);
+    });
     api<{ companies: Company[] }>(`portfolio?mode=${mode}`)
       .then((d) => {
         if (active) {

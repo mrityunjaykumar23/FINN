@@ -1,3 +1,10 @@
+import { financialLabelSupported } from "./financial-labels";
+import {
+  completedSessions,
+  exchangeDate,
+  type MarketMeta,
+} from "./market-sessions";
+import { briefingPlan, monitoringCoverage } from "./briefing-query";
 import { env } from "cloudflare:workers";
 import seedData from "../data/seed.json";
 import {
@@ -6,7 +13,6 @@ import {
   evaluateMarket,
   rank,
   inWindow,
-  compareGuidance,
   normalizeTicker,
   retrieve,
   type Point,
@@ -45,17 +51,7 @@ const seed = seedData as unknown as {
     { points: Point[]; retrieved_at: string; url: string }
   >;
 };
-import {
-  db,
-  all,
-  one,
-  run,
-  sha,
-  ApiError,
-  budget,
-  lock,
-  unlock,
-} from "../db/repository";
+import { db, all, one, run, sha, ApiError } from "../db/repository";
 export { db, all, one, run, sha, ApiError } from "../db/repository";
 import {
   providerStatus,
@@ -151,6 +147,45 @@ export async function initialize() {
         ]);
       await run(
         "INSERT OR IGNORE INTO meta(key,value) VALUES ('metric-definition-check-v3','complete')",
+      );
+    }
+    if (
+      !(await one(
+        "SELECT value FROM meta WHERE key='metric-definition-check-v4'",
+      ))
+    ) {
+      const candidates = await all<{
+        id: string;
+        document_id: string;
+        name: string;
+        evidence_text: string;
+      }>(
+        "SELECT id,document_id,name,evidence_text FROM financial_metrics WHERE extraction_method='gemini' AND verification_status<>'unverified' AND name IN ('Revenue','Operating margin','Borrowings')",
+      );
+      for (const m of candidates.filter(
+        (m) => !financialLabelSupported(m.name, m.evidence_text),
+      ))
+        await db().batch([
+          db()
+            .prepare(
+              "INSERT INTO extraction_audit(id,document_id,method,status,reason,created_at) VALUES (?,?,?,?,?,?)",
+            )
+            .bind(
+              crypto.randomUUID(),
+              m.document_id,
+              "definition_review_v4",
+              "superseded",
+              `Metric ${m.id}: ${m.name} is not established by its accepted excerpt; retained unverified.`,
+              new Date().toISOString(),
+            ),
+          db()
+            .prepare(
+              "UPDATE financial_metrics SET verification_status='unverified' WHERE id=?",
+            )
+            .bind(m.id),
+        ]);
+      await run(
+        "INSERT OR IGNORE INTO meta(key,value) VALUES ('metric-definition-check-v4','complete')",
       );
     }
     if (await one("SELECT value FROM meta WHERE key = ?", seed.version)) {
@@ -545,48 +580,90 @@ export async function digest(owner: string, params: URLSearchParams) {
   const mode = params.get("mode") === "live" ? "live" : "historical";
   const end =
     params.get("end") ??
-    (mode === "historical"
-      ? seed.as_of
-      : new Date().toISOString().slice(0, 10));
+    (mode === "historical" ? seed.as_of : exchangeDate(new Date()));
   const days = Math.min(3650, Math.max(1, Number(params.get("days") ?? 1)));
   const start =
     params.get("start") ??
     new Date(new Date(end + "T00:00:00Z").getTime() - (days - 1) * 86400000)
       .toISOString()
       .slice(0, 10);
-  const [portfolio, settings, filingRows] = await Promise.all([
+  const [portfolio, settings] = await Promise.all([
     portfolioFor(owner, mode),
     getSettings(owner),
-    all<{ payload: string }>(
-      "SELECT a.payload FROM announcements a JOIN portfolio_companies p ON p.ticker=a.ticker WHERE p.owner=? AND a.ingestion_mode=? AND json_extract(a.payload,'$.canonical_event_id') IS NULL AND a.date>=? AND a.date<=? AND (?='' OR a.ticker=?) AND (?='' OR a.category=?) ORDER BY a.materiality_score DESC,a.date DESC,a.id DESC LIMIT 200",
-      owner,
-      mode,
-      start,
-      end,
-      params.get("ticker") ?? "",
-      params.get("ticker") ?? "",
-      params.get("category") ?? "",
-      params.get("category") ?? "",
-    ),
   ]);
-  const filings = filingRows.map((r) => JSON.parse(r.payload) as Filing);
-  const tickers = new Set(portfolio.map((c) => c.ticker));
-  const relevant = filings.filter(
-    (f) =>
-      tickers.has(f.ticker) &&
-      inWindow(f.date, start, end) &&
-      (!params.get("ticker") || f.ticker === params.get("ticker")) &&
-      (!params.get("category") || f.category === params.get("category")),
+  const filters = {
+    owner,
+    mode,
+    start,
+    end,
+    ticker: params.get("ticker") ?? undefined,
+    category: params.get("category") ?? undefined,
+    priority: params.has("priority")
+      ? Number(params.get("priority"))
+      : undefined,
+    limit: Number(params.get("limit") ?? 30),
+    cursor: params.get("cursor") ?? undefined,
+    routine_cursor: params.get("routine_cursor") ?? undefined,
+  };
+  let important, low;
+  try {
+    important = briefingPlan(filters, settings);
+    low = briefingPlan(filters, settings, "routine");
+  } catch {
+    throw new ApiError(
+      422,
+      "invalid_cursor",
+      "The briefing cursor is invalid.",
+    );
+  }
+  const [totals, eventRows, routineRows, sync] = await Promise.all([
+    one<{ total: number; important_count: number; event_companies: number }>(
+      important.count.sql,
+      ...important.count.values,
+    ),
+    all<{ id: string; date: string; payload: string; score: number }>(
+      important.page.sql,
+      ...important.page.values,
+    ),
+    all<{ id: string; date: string; payload: string; score: number }>(
+      low.page.sql,
+      ...low.page.values,
+    ),
+    all<{
+      ticker: string;
+      provider: string;
+      status: string;
+      last_success: string | null;
+      last_attempt: string | null;
+    }>("SELECT * FROM source_sync"),
+  ]);
+  const coverage = monitoringCoverage(
+    portfolio.map((c) => c.ticker),
+    announcementSources,
+    sync,
+    start,
+    end,
   );
-  const ranked = (
-    await Promise.all(relevant.map((f) => eventDetail(f, settings)))
-  ).sort((a, b) => b.score - a.score || b.date.localeCompare(a.date));
-  const surfaced = ranked.filter(
-    (f) =>
-      f.score >= settings.min_priority &&
-      settings.enabled_categories.includes(f.category),
-  );
-  const routine = ranked.filter((f) => !surfaced.some((s) => s.id === f.id));
+  const enrich = async (rows: typeof eventRows) =>
+    Promise.all(
+      rows
+        .slice(0, important.limit)
+        .map((r) => eventDetail(JSON.parse(r.payload), settings)),
+    );
+  const [surfaced, routine] = await Promise.all([
+    enrich(eventRows),
+    enrich(routineRows),
+  ]);
+  const next = (rows: typeof eventRows) =>
+    rows.length > important.limit
+      ? btoa(
+          JSON.stringify([
+            rows[important.limit - 1].score,
+            rows[important.limit - 1].date,
+            rows[important.limit - 1].id,
+          ]),
+        )
+      : null;
   const movements = (
     await Promise.all(
       portfolio.map(async (c) => {
@@ -602,8 +679,8 @@ export async function digest(owner: string, params: URLSearchParams) {
       }),
     )
   ).flat();
-  await evaluateAlerts(owner, mode, start, end);
-  const covered = new Set(filings.map((f) => f.ticker));
+  if (!filters.cursor && !filters.routine_cursor)
+    await evaluateAlerts(owner, mode, start, end);
   return {
     mode,
     start,
@@ -611,9 +688,15 @@ export async function digest(owner: string, params: URLSearchParams) {
     events: surfaced,
     routine,
     market_alerts: movements,
-    total: ranked.length,
+    total: totals?.total ?? 0,
+    important_count: totals?.important_count ?? 0,
+    routine_count: (totals?.total ?? 0) - (totals?.important_count ?? 0),
+    companies_with_events: totals?.event_companies ?? 0,
+    next_cursor: next(eventRows),
+    next_routine_cursor: next(routineRows),
+    ...coverage,
     companies: portfolio.length,
-    covered_companies: portfolio.filter((c) => covered.has(c.ticker)).length,
+    covered_companies: coverage.successfully_checked_companies,
     unavailable_companies: portfolio.filter((c) => !c.date).length,
     source_note:
       mode === "historical"
@@ -643,6 +726,7 @@ export async function research(
     Date.parse(discoveryState.last_attempt) < Date.now() - 86400000;
   if (
     !docs.length ||
+    (!!filters.type && !docs.some((d) => d.type === filters.type)) ||
     (stale &&
       !(filters.period && docs.some((d) => d.period === filters.period)))
   ) {
@@ -809,15 +893,17 @@ export async function research(
     source_ids: [s.id],
     excerpt: true,
   }));
-  const calculated = !filters.type
-    ? calculateFindings(
-        ticker,
-        question,
-        metrics,
-        await guidanceRows(ticker),
-        requestedPeriod,
-      )
-    : [];
+  const calculated = calculateFindings(
+    ticker,
+    question,
+    filters.type
+      ? metrics.filter((m) =>
+          docs.some((d) => d.id === m.document_id && d.type === filters.type),
+        )
+      : metrics,
+    await guidanceRows(ticker),
+    requestedPeriod,
+  );
   if (calculated.length) {
     const findings: Research["key_findings"] = [];
     for (const finding of calculated) {
@@ -852,6 +938,8 @@ export async function research(
           text: finding.text,
           source_ids: [...new Set(ids)],
           excerpt: false,
+          evidence_type: finding.evidence_type ?? "calculated",
+          verification: "deterministic",
         });
     }
     if (findings.length) {
@@ -875,10 +963,14 @@ export async function research(
         source_ids: f.supporting_source_ids,
         evidence_excerpt: f.evidence_excerpt,
         uncertainty_note: f.uncertainty_note,
+        evidence_type: f.evidence_type,
         verification: "source_checked",
       });
       output.summary = answer.concise_summary.claim;
       output.key_findings = [
+        ...output.key_findings.filter(
+          (f) => f.verification === "deterministic",
+        ),
         mapped(answer.concise_summary),
         ...answer.findings.map(mapped),
       ];
@@ -969,9 +1061,15 @@ export async function yahooMarket(ticker: string) {
       result:
         | {
             timestamp: number[];
-            meta: { longName?: string; symbol?: string };
+            meta: MarketMeta;
             indicators: {
-              quote: { close: number[]; volume: number[] }[];
+              quote: {
+                open: number[];
+                high: number[];
+                low: number[];
+                close: number[];
+                volume: number[];
+              }[];
               adjclose?: { adjclose: number[] }[];
             };
           }[]
@@ -987,28 +1085,21 @@ export async function yahooMarket(ticker: string) {
     );
   const quote = value.indicators.quote[0],
     adjusted = value.indicators.adjclose?.[0]?.adjclose ?? quote.close;
-  // Exclude the current Indian calendar day: a chart can include an unfinished session.
-  const today = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Kolkata",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date());
-  const points = value.timestamp
-    .map((t, i) => ({
-      date: new Date(t * 1000).toISOString().slice(0, 10),
-      close: quote.close[i],
-      adjusted_close: adjusted[i],
-      volume: quote.volume[i],
-    }))
-    .filter(
-      (p) =>
-        p.date < today &&
-        [p.close, p.adjusted_close, p.volume].every(Number.isFinite),
-    );
+  const observations = value.timestamp.map((t, i) => ({
+    timestamp: t,
+    date: exchangeDate(t * 1000),
+    open: quote.open?.[i],
+    high: quote.high?.[i],
+    low: quote.low?.[i],
+    close: quote.close[i],
+    adjusted_close: adjusted[i],
+    volume: quote.volume[i],
+  }));
+  const { points, freshness } = completedSessions(observations, value.meta);
   return {
     name: value.meta.longName ?? value.meta.symbol ?? ticker,
     points,
+    freshness,
     source: url,
     retrieved_at: new Date().toISOString(),
   };
@@ -1077,7 +1168,9 @@ export function safeSourceUrl(raw: string, officialHost?: string) {
       !u.username &&
       !u.password &&
       !u.port &&
-      !/^\d|localhost|\.local$/.test(u.hostname) &&
+      !/^\d|:|\[|localhost|\.(?:local|localhost|internal|test)$/.test(
+        u.hostname,
+      ) &&
       (exchanges.includes(u.hostname) ||
         (!!officialHost &&
           (u.hostname === officialHost ||
@@ -1140,27 +1233,77 @@ async function discoverDocumentsWork(
       new Date().toISOString(),
     );
   }
-  const ranked = rankCandidates(candidates, task.question, task);
+  const indexed = await all<{
+    url: string;
+    period: string;
+    period_status: string;
+    extraction_status: string;
+    indexed_pages: number | null;
+    total_pages: number | null;
+  }>(
+    "SELECT url,period,period_status,extraction_status,indexed_pages,total_pages FROM documents WHERE ticker=?",
+    ticker,
+  );
+  const ranked = rankCandidates(
+    candidates.map((c) => {
+      const d = indexed.find((d) => d.url === c.url);
+      return d
+        ? {
+            ...c,
+            extraction_status: d.extraction_status,
+            indexed_pages: d.indexed_pages,
+            total_pages: d.total_pages,
+            period:
+              c.period ?? (d.period_status !== "unverified" ? d.period : null),
+          }
+        : c;
+    }),
+    task.question,
+    task,
+  );
   // At most four documents per interactive refresh; pending/failed candidates remain resumable.
   const pending = [];
+  const { enqueueDocument } = await import("./ingestion/document-jobs");
   for (const c of ranked) {
     const known = await one<{ id: string }>(
-      "SELECT id FROM documents WHERE ticker=? AND url=?",
+      "SELECT id FROM documents WHERE ticker=? AND url=? AND extraction_status='complete'",
       ticker,
       c.url,
     );
-    if (!known) pending.push(c);
-    else
+    if (known) {
       await run(
         "UPDATE discovery_candidates SET status='indexed',document_id=? WHERE ticker=? AND url=?",
         known.id,
         ticker,
         c.url,
       );
+      continue;
+    }
+    const job = await one<{ status: string; next_retry: string | null }>(
+      "SELECT status,next_retry FROM document_jobs WHERE ticker=? AND url=?",
+      ticker,
+      c.url,
+    );
+    if (
+      job &&
+      (["complete", "manual_required", "running"].includes(job.status) ||
+        (job.next_retry && job.next_retry > new Date().toISOString()))
+    )
+      continue;
+    await enqueueDocument(ticker, c);
+    pending.push(c);
   }
-  let indexed = 0,
+  let indexedCount = 0,
     failed = 0;
-  for (const c of pending.slice(0, 4)) {
+  // One bounded download during an interactive refresh. Everything else is durably queued.
+  for (const c of pending.slice(0, 1)) {
+    const claimed = await one<{ id: string }>(
+      "UPDATE document_jobs SET status='running',updated_at=? WHERE ticker=? AND url=? AND status='pending' RETURNING id",
+      new Date().toISOString(),
+      ticker,
+      c.url,
+    );
+    if (!claimed) continue;
     try {
       const id = await ingestPdf(ticker, c.url, c.title, c.officialHost);
       await run(
@@ -1175,38 +1318,50 @@ async function discoverDocumentsWork(
         ticker,
         c.url,
       );
-      indexed++;
-      const result = await extractDocument(ticker, id);
-      if (result.status.includes("failed"))
-        limitations.push(
-          "Financial extraction unavailable; indexed source text remains available.",
-        );
+      await run(
+        "UPDATE document_jobs SET status='complete',document_id=?,updated_at=? WHERE ticker=? AND url=?",
+        id,
+        new Date().toISOString(),
+        ticker,
+        c.url,
+      );
+      indexedCount++;
+      await extractDocument(ticker, id);
     } catch (e) {
       failed++;
       const detail =
-        e instanceof ApiError
-          ? e.message
-          : "Original PDF unavailable, oversized or not extractable. Use protected import after verifying the original source.";
+        e instanceof Error
+          ? e.message.slice(0, 500)
+          : "Original document unavailable";
       await run(
-        "UPDATE discovery_candidates SET status='unavailable',detail=? WHERE ticker=? AND url=?",
+        "UPDATE discovery_candidates SET status='pending',detail=? WHERE ticker=? AND url=?",
         detail,
         ticker,
         c.url,
       );
-      limitations.push(detail);
+      await run(
+        "UPDATE document_jobs SET status='pending',next_retry=?,error=?,updated_at=CURRENT_TIMESTAMP WHERE ticker=? AND url=?",
+        new Date(Date.now() + 5 * 60000).toISOString(),
+        detail,
+        ticker,
+        c.url,
+      );
+      limitations.push(
+        detail + " Background job retained; no automatic unbounded retry.",
+      );
     }
   }
   if (!candidates.length)
     limitations.push(
       "No permitted primary PDF links found. This is incomplete coverage, not proof of no disclosures.",
     );
-  if (pending.length > 4)
+  if (pending.length > 1)
     limitations.push(
-      `${pending.length - 4} additional candidate documents remain pending a controlled refresh.`,
+      `${pending.length - 1} additional candidate documents remain pending a controlled refresh.`,
     );
   return {
     limitations: [...new Set(limitations)],
-    indexed,
+    indexed: indexedCount,
     failed,
     candidates: candidates.length,
     discovered: candidates.length,
@@ -1218,6 +1373,7 @@ export async function ingestPdf(
   url: string,
   title: string,
   officialHost?: string,
+  options: { background?: boolean } = {},
 ) {
   if (!officialHost) {
     officialHost = announcementSources.find(
@@ -1273,7 +1429,15 @@ export async function ingestPdf(
     PDF_MAX_PAGES?: string;
   };
   const maxBytes =
-    Math.max(1, Math.min(16, Number(pdfConfig.PDF_MAX_MB) || 8)) * 1024 * 1024;
+    Math.max(
+      1,
+      Math.min(
+        options.background ? 32 : 16,
+        options.background ? 32 : Number(pdfConfig.PDF_MAX_MB) || 8,
+      ),
+    ) *
+    1024 *
+    1024;
   const declaredSize = Number(r.headers.get("content-length") ?? 0);
   if (declaredSize > 0)
     await run(
@@ -1284,7 +1448,7 @@ export async function ingestPdf(
     );
   if (Number(r.headers.get("content-length") ?? 0) > maxBytes)
     throw new Error(
-      "Document exceeds the 8 MB interactive limit. Its candidate remains recorded; an administrator can import the original with the bounded local-file workflow.",
+      `Document exceeds the ${maxBytes / 1024 / 1024} MB limit; queued/background or protected original-file import is required.`,
     );
   const reader = r.body?.getReader();
   if (!reader) throw new Error("Empty document");
@@ -1296,7 +1460,7 @@ export async function ingestPdf(
     length += result.value.length;
     if (length > maxBytes) {
       await reader.cancel();
-      throw new Error("Document exceeds 8 MB");
+      throw new Error(`Document exceeds ${maxBytes / 1024 / 1024} MB`);
     }
     buffers.push(result.value);
   }
@@ -1394,9 +1558,9 @@ export async function ingestPdf(
       hash,
       "live",
       new URL(url).hostname,
-      "complete",
+      pages.every((p) => p.trim().length > 0) ? "complete" : "partial",
       pages.length,
-      pages.length,
+      pages.filter((p) => p.trim().length > 0).length,
     );
   const rows = pages.flatMap((text, p) =>
     chunkPage(text).map((text, i) => [

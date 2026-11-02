@@ -55,6 +55,13 @@ import {
 import { sortPeriods } from "@/lib/periods";
 import { SystemStatus } from "./SystemStatus";
 type Overview = {
+  market_freshness?: {
+    status: string;
+    last_success: string | null;
+    last_attempt: string | null;
+    details: string;
+    error?: string;
+  };
   company: Company;
   metrics: Metric[];
   documents: Omit<Document, "pages">[];
@@ -132,13 +139,21 @@ export function ResearchView({
   );
   useEffect(() => {
     let active = true;
-    setLoading(true);
-    setAnswer(null);
-    setOverview(null);
-    setError("");
-    setQuestion(initialQuestion);
-    setType("");
-    setPeriod("");
+    queueMicrotask(() => {
+      if (active) {
+        setLoading(true);
+        setAnswer(null);
+        setOverview(null);
+        setError("");
+      }
+    });
+    queueMicrotask(() => {
+      if (active) {
+        setQuestion(initialQuestion);
+        setType("");
+        setPeriod("");
+      }
+    });
     api<Overview>(
       `companies/${encodeURIComponent(ticker)}/overview?mode=${mode}`,
     )
@@ -551,6 +566,20 @@ export function ResearchView({
                       live mode. No chart points are manufactured.
                     </Empty>
                   )}
+                  {mode === "live" && (
+                    <p className="muted">
+                      Latest stored session:{" "}
+                      {overview.points.at(-1)?.date ?? "unavailable"} · Last
+                      successful market check:{" "}
+                      {overview.market_freshness?.last_success
+                        ? new Date(
+                            overview.market_freshness.last_success,
+                          ).toLocaleString()
+                        : "never"}{" "}
+                      · Source status:{" "}
+                      {overview.market_freshness?.status ?? "not checked"}
+                    </p>
+                  )}
                   <p className="table-note">
                     Prices in ₹. The price series uses adjusted closes
                     consistently; it may differ from the daily close in your
@@ -753,6 +782,17 @@ export function ResearchAnswer({ answer }: { answer: Research }) {
             <ChevronDown size={14} />
           </summary>
           <div className="finding-body">
+            <p className="muted">
+              {finding.excerpt
+                ? "Primary source excerpt"
+                : finding.evidence_type === "calculated"
+                  ? "Calculated metric"
+                  : finding.evidence_type === "commentary"
+                    ? "Management commentary"
+                    : finding.evidence_type === "reported"
+                      ? "Reported fact · source checks applied"
+                      : "Interpretation · inspect supporting evidence"}
+            </p>
             <div
               className={
                 finding.excerpt || answer.engine.startsWith("Source retrieval")

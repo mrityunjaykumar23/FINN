@@ -4,7 +4,9 @@ FINN turns primary company disclosures and stored end-of-day observations into a
 
 This upgrade is on **`upgrade/sqlite-gemini-push-pull`**, for localhost review. It has not been pushed to GitHub or deployed. The [public repository](https://github.com/mrityunjaykumar23/FINN) and [public demo](https://finn-investment-intelligence-mrity.hazyanole2049.chatgpt.site) still describe the earlier published version.
 
-The final reliability upgrade is described in [the change report](docs/RELIABILITY_UPGRADE.md), with [actual verification](docs/VERIFICATION.md). It adds source-derived event identity/materiality, bounded announcement jobs, database-first FTS, guidance-aware caches, ordinary-name search and resumable file indexing while preserving the existing application.
+The final corrections and current acceptance results are in [FINAL_CORRECTIONS_REPORT.md](docs/FINAL_CORRECTIONS_REPORT.md). For a reproducible offline source demo, run `npm run demo:prepare` after migration and starting localhost; see [DEMO.md](docs/DEMO.md).
+
+The preceding reliability upgrade is described in [the change report](docs/RELIABILITY_UPGRADE.md), with [actual verification](docs/VERIFICATION.md). It adds source-derived event identity/materiality, bounded announcement jobs, database-first FTS, guidance-aware caches, ordinary-name search and resumable file indexing while preserving the existing application.
 
 ## Run locally
 
@@ -121,6 +123,6 @@ npm run test:reliability-api
 py scripts/validate-retrieved.py
 ```
 
-Jobs return company and owner continuation cursors. Pass `after` and `owner_after` in the optional JSON input to resume. The official NTPC adapter samples two latest accessible filings on its first run; other providers clearly retain incomplete/manual-import coverage. A first run is not a historical backfill or exchange-wide monitoring.
+Jobs return company and owner continuation cursors. Pass `after` and `owner_after` in the optional JSON input to resume. NTPC and SBI use verified dated tables; Maruti uses its official structured CMS endpoint. Discovery continuation and the stored candidate queue preserve older filings. Two filings per company are processed per bounded ingestion request. Sources without authoritative dates require review, and source failures remain explicit. Coverage is limited to registered sources and their stated scopes.
 
 Large original files can be processed with `node scripts/import-local-pdf.mjs manifest.json`; see [the walkthrough](docs/DEMO.md). `npm run test:cache` requires `FINN_CACHE_TEST_URL` pointing at a fresh isolated localhost test database; it never clears existing guidance. All ordinary mutation tests are restricted to localhost.

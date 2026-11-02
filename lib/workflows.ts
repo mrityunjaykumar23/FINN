@@ -1,3 +1,4 @@
+import announcementSources from "../data/announcement-sources.json";
 import { quarterlyComparisons, selectMetric } from "./periods";
 import {
   db,
@@ -17,14 +18,12 @@ import {
   rank,
   evaluateMarket,
   compareGuidance,
-  classify,
 } from "./domain";
 import {
   getDocument,
   getPoints,
   resolveCompany,
   ingestPdf,
-  discoverDocuments,
   yahooMarket,
   storeMarket,
 } from "./server";
@@ -35,6 +34,7 @@ import {
   eventEvidence,
   normalizeEvidence,
 } from "./event-analysis";
+import { supportsEvent } from "./event-evidence";
 
 export async function persistFiling(
   f: Filing,
@@ -67,7 +67,7 @@ export async function persistFiling(
     f.category,
     f.summary,
     f.why,
-    f.date,
+    f.published_at ?? f.date,
     new Date().toISOString(),
     doc.url,
     method,
@@ -380,7 +380,11 @@ export async function evaluateAll(
         await trackSync("market", ticker, async () => {
           const data = await yahooMarket(ticker);
           const counts = await storeMarket(ticker, data);
-          return { discovered: data.points.length, ...counts };
+          return {
+            discovered: data.points.length,
+            ...counts,
+            freshness: data.freshness,
+          };
         });
         marketResults.push({ ticker, status: "success" });
       } catch (e) {
@@ -461,12 +465,15 @@ export async function trackSync<
         ),
       db()
         .prepare(
-          "INSERT INTO source_sync(provider,ticker,last_success,last_attempt,next_retry,status) VALUES (?,?,?,?,?,?) ON CONFLICT(provider,ticker) DO UPDATE SET last_success=excluded.last_success,last_attempt=excluded.last_attempt,next_retry=excluded.next_retry,status=excluded.status,error=NULL",
+          "INSERT INTO source_sync(provider,ticker,last_success,last_attempt,next_retry,status) VALUES (?,?,?,?,?,?) ON CONFLICT(provider,ticker) DO UPDATE SET last_success=coalesce(excluded.last_success,source_sync.last_success),last_attempt=excluded.last_attempt,next_retry=excluded.next_retry,status=excluded.status,error=NULL",
         )
         .bind(
           provider,
           ticker,
-          finished,
+          ((result as T & { status?: string }).status ?? "success") ===
+            "success"
+            ? finished
+            : null,
           started,
           new Date(Date.now() + 60000).toISOString(),
           (result as T & { status?: string }).status ?? "success",
@@ -481,6 +488,45 @@ export async function trackSync<
       provider,
       ticker,
     );
+    const info = result as T & {
+      manual_required?: number;
+      undated?: number;
+      failures?: number;
+      pending?: number;
+      discovery_cursor?: string | null;
+      coverage?: unknown;
+      freshness?: unknown;
+    };
+    const details = JSON.stringify({
+      coverage: info.coverage,
+      freshness: info.freshness,
+    });
+    await db().batch([
+      db()
+        .prepare(
+          "UPDATE source_sync SET manual_required=?,failures=?,pending=?,discovery_cursor=?,details=? WHERE provider=? AND ticker=?",
+        )
+        .bind(
+          info.manual_required ?? info.undated ?? 0,
+          info.failures ?? 0,
+          info.pending ?? 0,
+          info.discovery_cursor ?? null,
+          details,
+          provider,
+          ticker,
+        ),
+      db()
+        .prepare("UPDATE ingestion_runs SET details=? WHERE id=?")
+        .bind(
+          JSON.stringify({
+            manual_required: info.manual_required ?? info.undated ?? 0,
+            failures: info.failures ?? 0,
+            pending: info.pending ?? 0,
+            ...JSON.parse(details),
+          }),
+          id,
+        ),
+    ]);
     return { ...result, run_id: id };
   } catch (e) {
     const message =
@@ -495,7 +541,7 @@ export async function trackSync<
         .bind("failed", new Date().toISOString(), message, id),
       db()
         .prepare(
-          "INSERT INTO source_sync(provider,ticker,last_attempt,next_retry,status,error) VALUES (?,?,?,?,?,?) ON CONFLICT(provider,ticker) DO UPDATE SET last_attempt=excluded.last_attempt,next_retry=excluded.next_retry,status=excluded.status,error=excluded.error",
+          "INSERT INTO source_sync(provider,ticker,last_attempt,next_retry,status,error,failures) VALUES (?,?,?,?,?,?,1) ON CONFLICT(provider,ticker) DO UPDATE SET last_attempt=excluded.last_attempt,next_retry=excluded.next_retry,status=excluded.status,error=excluded.error,failures=source_sync.failures+1",
         )
         .bind(
           provider,
@@ -522,6 +568,11 @@ export async function importFiling(input: {
   reprocess?: boolean;
   event_quote?: string;
   exchange_filing_id?: string;
+  category?: import("./domain").Category;
+  source_provider?: string;
+  publication_precision?: string;
+  publication_timezone?: string;
+  source_timestamp?: string;
 }) {
   await resolveCompany(input.ticker);
   const known = input.document_id
@@ -542,6 +593,7 @@ export async function importFiling(input: {
       "A valid matching company source page is required.",
     );
   const rule = categoryForEvent(input.headline, input.event_quote ?? page.text);
+  if (input.category) rule.category = input.category;
   let quote: string;
   try {
     quote = eventEvidence(page.text, rule.category, input.event_quote);
@@ -552,6 +604,12 @@ export async function importFiling(input: {
       "The event quote must occur verbatim on the cited source page.",
     );
   }
+  if (!supportsEvent(rule.category, quote))
+    throw new ApiError(
+      422,
+      "event_requires_review",
+      "The selected category has no verified supporting passage on this page.",
+    );
   const signature = await sha(`${rule.category}:${normalizeEvidence(quote)}`);
   // Reconcile legacy records lazily, preserving their public IDs and alert foreign keys.
   const matches = await all<{
@@ -563,8 +621,8 @@ export async function importFiling(input: {
     input.ticker,
     id,
     signature,
-    input.event_quote ? 0 : 1,
-    input.event_quote ? 0 : 1,
+    input.event_quote && !input.source_provider ? 0 : 1,
+    input.event_quote && !input.source_provider ? 0 : 1,
     rule.category,
     page.page,
   );
@@ -644,7 +702,15 @@ export async function importFiling(input: {
             " Gemini classification unavailable or rejected; source excerpt and rules shown.";
         }
       }
-      const materiality = analyzeMateriality(rule.category, quote);
+      const scaleMetrics = await all<Metric>(
+        "SELECT m.*,d.published_at FROM financial_metrics m JOIN documents d ON d.id=m.document_id AND d.ticker=m.ticker WHERE m.ticker=? AND m.verification_status<>'unverified'",
+        input.ticker,
+      );
+      const materiality = analyzeMateriality(rule.category, quote, {
+        ticker: input.ticker,
+        date: input.date,
+        metrics: scaleMetrics,
+      });
       const filing: Filing = {
         id:
           prior?.id ??
@@ -664,6 +730,10 @@ export async function importFiling(input: {
         novelty: materiality.novelty,
         evidence: materiality.evidence,
         event_signature: signature,
+        source_provider: input.source_provider ?? "verified_admin",
+        publication_precision: input.publication_precision ?? "date",
+        publication_timezone: input.publication_timezone,
+        published_at: input.source_timestamp,
         exchange_filing_id: input.exchange_filing_id,
         event_quote: quote,
         event_scope: input.event_quote ? "explicit" : "page_category",
@@ -710,13 +780,22 @@ export async function systemStatus(owner?: string) {
     indexing: await all(
       "SELECT ticker,status,count(*) documents FROM discovery_candidates GROUP BY ticker,status",
     ),
-    monitored_companies:
-      (
-        await one<{ n: number }>(
-          `SELECT count(DISTINCT ticker) n FROM portfolio_companies ${owner ? "WHERE owner=?" : ""}`,
-          ...(owner ? [owner] : []),
-        )
-      )?.n ?? 0,
+    monitored_companies: (
+      await all<{ ticker: string }>(
+        `SELECT DISTINCT ticker FROM portfolio_companies ${owner ? "WHERE owner=?" : ""}`,
+        ...(owner ? [owner] : []),
+      )
+    ).filter((c) =>
+      announcementSources.some(
+        (s) =>
+          s.ticker === c.ticker &&
+          (!("scope_end" in s) ||
+            String(s.scope_end) >= new Date().toISOString().slice(0, 10)),
+      ),
+    ).length,
+    document_jobs: await all(
+      "SELECT status,count(*) n FROM document_jobs GROUP BY status",
+    ),
     recent_runs: await all(
       "SELECT * FROM ingestion_runs ORDER BY started_at DESC LIMIT 20",
     ),

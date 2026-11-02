@@ -143,7 +143,6 @@ export function PromiseTracker({
 
 export function GuidanceCard({
   g,
-  index,
   onResearch,
 }: {
   g: GuidanceResult;

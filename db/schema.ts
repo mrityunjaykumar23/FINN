@@ -8,7 +8,6 @@ import {
   foreignKey,
   index,
   uniqueIndex,
-  check,
   type AnySQLiteColumn,
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
@@ -388,6 +387,9 @@ export const ingestionRuns = sqliteTable(
       .notNull()
       .default(sql`0`),
     error: text("error"),
+    details: text("details")
+      .notNull()
+      .default(sql`'{}'`),
   },
   (t) => [
     index("runs_provider_ticker_time").on(t.provider, t.ticker, t.started_at),
@@ -411,6 +413,13 @@ export const sourceSync = sqliteTable(
     discovered: integer("discovered").notNull().default(0),
     inserted: integer("inserted").notNull().default(0),
     duplicates: integer("duplicates").notNull().default(0),
+    manual_required: integer("manual_required").notNull().default(0),
+    failures: integer("failures").notNull().default(0),
+    pending: integer("pending").notNull().default(0),
+    discovery_cursor: text("discovery_cursor"),
+    details: text("details")
+      .notNull()
+      .default(sql`'{}'`),
   },
   (t) => [primaryKey({ columns: [t.provider, t.ticker] })],
 );
@@ -447,10 +456,59 @@ export const discoveryCandidates = sqliteTable(
     detail: text("detail"),
     document_id: text("document_id").references(() => documents.id),
     checked_at: text("checked_at").notNull(),
+    provider: text("provider")
+      .notNull()
+      .default(sql`'original_link_directory'`),
+    external_id: text("external_id"),
+    publication_precision: text("publication_precision")
+      .notNull()
+      .default(sql`'unknown'`),
+    publication_timezone: text("publication_timezone"),
+    source_timestamp: text("source_timestamp"),
+    verification_status: text("verification_status")
+      .notNull()
+      .default(sql`'candidate'`),
+    processing_status: text("processing_status")
+      .notNull()
+      .default(sql`'pending'`),
+    attempts: integer("attempts").notNull().default(0),
+    next_retry: text("next_retry"),
   },
   (t) => [
     uniqueIndex("candidate_url").on(t.ticker, t.url),
     index("candidate_status").on(t.ticker, t.status),
+    index("candidate_processing").on(
+      t.ticker,
+      t.provider,
+      t.processing_status,
+      t.published_at,
+    ),
+  ],
+);
+export const documentJobs = sqliteTable(
+  "document_jobs",
+  {
+    id: text("id").primaryKey(),
+    ticker: text("ticker")
+      .notNull()
+      .references(() => companies.ticker),
+    url: text("url").notNull(),
+    title: text("title").notNull(),
+    type: text("type").notNull(),
+    official_host: text("official_host"),
+    status: text("status")
+      .notNull()
+      .default(sql`'pending'`),
+    attempts: integer("attempts").notNull().default(0),
+    next_retry: text("next_retry"),
+    error: text("error"),
+    document_id: text("document_id").references(() => documents.id),
+    created_at: text("created_at").notNull(),
+    updated_at: text("updated_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("document_job_url").on(t.ticker, t.url),
+    index("document_job_pending").on(t.status, t.next_retry),
   ],
 );
 export const requestBudgets = sqliteTable(

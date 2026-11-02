@@ -138,7 +138,21 @@ export async function synthesizeResearch(
   metrics: Metric[],
   calculated: string[],
 ) {
-  const input = { ticker, question, sources, metrics, calculated };
+  // Evidence prose is already supplied as bounded source passages. Repeating complete pages
+  // once per metric can exceed the native provider budget even for a small company.
+  const boundedMetrics = metrics
+    .filter((m) =>
+      sources.some((s) => s.document_id === m.document_id && s.page === m.page),
+    )
+    .slice(0, 80)
+    .map((m) => ({ ...m, evidence_text: undefined }));
+  const input = {
+    ticker,
+    question,
+    sources,
+    metrics: boundedMetrics,
+    calculated,
+  };
   const result = await aiTask("research", ticker, input, (model) =>
     analyzeCompanyResearch(geminiTransport(config()), model, input),
   );
@@ -183,7 +197,7 @@ export async function extractDocument(ticker: string, documentId: string) {
     );
   const nowProse = new Date().toISOString();
   await run(
-    "UPDATE financial_metrics SET verification_status='unverified' WHERE document_id=? AND extraction_method IN ('explicit_prose_v1','explicit_table_v1')",
+    "UPDATE financial_metrics SET verification_status='unverified' WHERE document_id=? AND extraction_method IN ('explicit_prose_v1','explicit_table_v1','explicit_table_v2')",
     documentId,
   );
   for (const m of prose.metrics) {
@@ -191,7 +205,7 @@ export async function extractDocument(ticker: string, documentId: string) {
       `${ticker}:${m.name}:${m.period}:${m.basis}:${documentId}`,
     );
     await run(
-      `INSERT INTO financial_metrics(id,ticker,name,value,period,unit,basis,document_id,page,evidence_text,extraction_method,verification_status,updated_at,currency,scale,fiscal_year,fiscal_quarter) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value,evidence_text=excluded.evidence_text,page=excluded.page,updated_at=excluded.updated_at,verification_status=excluded.verification_status WHERE financial_metrics.extraction_method IN ('explicit_prose_v1','explicit_table_v1')`,
+      `INSERT INTO financial_metrics(id,ticker,name,value,period,unit,basis,document_id,page,evidence_text,extraction_method,verification_status,updated_at,currency,scale,fiscal_year,fiscal_quarter) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value,evidence_text=excluded.evidence_text,page=excluded.page,updated_at=excluded.updated_at,verification_status=excluded.verification_status WHERE financial_metrics.extraction_method IN ('explicit_prose_v1','explicit_table_v1','explicit_table_v2')`,
       id,
       ticker,
       m.name,

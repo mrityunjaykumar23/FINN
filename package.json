@@ -13,7 +13,7 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test tests/domain.test.ts tests/database.test.mjs tests/research.test.ts tests/ai.test.ts tests/periods.test.ts tests/extraction.test.ts tests/reliability.test.ts",
+    "test": "node --experimental-strip-types --test tests/domain.test.ts tests/database.test.mjs tests/research.test.ts tests/ai.test.ts tests/periods.test.ts tests/extraction.test.ts tests/reliability.test.ts tests/corrections.test.ts",
     "test:api": "node --test tests/api.test.mjs tests/upgrade-api.test.mjs",
     "db:migrate:local": "node scripts/migrate-local.mjs",
     "format": "prettier --write app components/*.tsx lib/domain.ts lib/server.ts lib/types.ts lib/research-analysis.ts tests db/schema.ts",
@@ -22,7 +22,9 @@
     "job:local": "node scripts/run-local-job.mjs",
     "test:ingestion": "node --test tests/ingestion.integration.test.mjs",
     "test:reliability-api": "node --test tests/reliability-api.test.mjs",
-    "test:cache": "node --test tests/cache.integration.test.mjs"
+    "test:cache": "node --test tests/cache.integration.test.mjs",
+    "demo:prepare": "node scripts/prepare-demo.mjs",
+    "test:demo": "node --test tests/demo.integration.test.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

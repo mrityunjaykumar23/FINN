@@ -227,7 +227,7 @@ export function FinancialTable({
         </table>
       </div>
       <p className="table-note">
-        Superscripts refer to source PDF pages. PAT retains its source's
+        Superscripts refer to source PDF pages. PAT retains its source&apos;s
         reported definition. Missing metrics are not approximated. Growth ratios
         with a zero or negative base are unavailable.
       </p>

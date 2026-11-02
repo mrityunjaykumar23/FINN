@@ -1,3 +1,5 @@
+import { prepareDemo } from "@/lib/demo";
+import { processDocumentJobs } from "@/lib/ingestion/document-jobs";
 import { syncAnnouncements } from "@/lib/ingestion/announcements";
 import { importFileBatch } from "@/lib/ingestion/local-file";
 import { searchCompanies } from "@/lib/company-search";
@@ -15,7 +17,6 @@ import {
   run,
   resolveCompany,
   getPoints,
-  getFilings,
   getFilingById,
   getFilingPage,
   getDocument,
@@ -26,16 +27,10 @@ import {
   yahooMarket,
   storeMarket,
   ingestPdf,
-  sha,
   ApiError,
 } from "@/lib/server";
-import {
-  categories,
-  normalizeTicker,
-  classify,
-  type Filing,
-} from "@/lib/domain";
-import type { Company, Document, Metric } from "@/lib/types";
+import { categories, normalizeTicker } from "@/lib/domain";
+import type { Document, Metric } from "@/lib/types";
 
 import { budget } from "@/db/repository";
 import { providerStatus, extractDocument } from "@/lib/ai/service";
@@ -45,7 +40,6 @@ import {
   evaluateAll,
   systemStatus,
   trackSync,
-  persistComparisons,
 } from "@/lib/workflows";
 import { discoverDocuments } from "@/lib/server";
 const settingsSchema = z.object({
@@ -234,6 +228,22 @@ async function handle(request: Request) {
         message: "Alert rules saved and latest stored sessions evaluated.",
       };
     } else if (path === "digest" && method === "GET") {
+      if (url.searchParams.has("limit"))
+        z.coerce
+          .number()
+          .int()
+          .min(1)
+          .max(100)
+          .parse(url.searchParams.get("limit"));
+      if (url.searchParams.has("priority"))
+        z.coerce
+          .number()
+          .min(0)
+          .max(100)
+          .parse(url.searchParams.get("priority"));
+      for (const k of ["cursor", "routine_cursor"])
+        if (url.searchParams.has(k))
+          z.string().max(1000).parse(url.searchParams.get(k));
       for (const key of ["start", "end"])
         if (url.searchParams.has(key))
           dateSchema.parse(url.searchParams.get(key));
@@ -368,6 +378,13 @@ async function handle(request: Request) {
         points: await getPoints(normalizeTicker(path.slice(7)), mode),
         mode,
         source: "Yahoo Finance",
+        freshness:
+          mode === "live"
+            ? await one(
+                "SELECT last_attempt,last_success,status,error,details FROM source_sync WHERE provider='market' AND ticker=?",
+                normalizeTicker(path.slice(7)),
+              )
+            : null,
         note: "Completed sessions only. Price-change calculations use adjusted close.",
       };
     else if (
@@ -387,6 +404,7 @@ async function handle(request: Request) {
       result = {
         ticker,
         sessions: market.points.length,
+        freshness: market.freshness,
         retrieved_at: market.retrieved_at,
         run_id: market.run_id,
         note: "Completed sessions only; historical data remains separate.",
@@ -411,6 +429,13 @@ async function handle(request: Request) {
           ticker,
         ),
         points: await getPoints(ticker, mode),
+        market_freshness:
+          mode === "live"
+            ? await one(
+                "SELECT last_attempt,last_success,status,error,details FROM source_sync WHERE provider='market' AND ticker=?",
+                ticker,
+              )
+            : null,
         guidance: await guidanceFor(ticker),
         mode,
       };
@@ -514,6 +539,39 @@ async function handle(request: Request) {
       const ticker = normalizeTicker(input.ticker);
       await resolveCompany(ticker);
       result = { id: await ingestPdf(ticker, input.url, input.title) };
+    } else if (path === "admin/prepare-demo" && method === "POST") {
+      admin(request);
+      result = await prepareDemo();
+    } else if (path === "admin/document-jobs" && method === "GET") {
+      admin(request);
+      result = {
+        jobs: await all(
+          "SELECT id,ticker,title,type,status,attempts,next_retry,error,document_id,updated_at FROM document_jobs ORDER BY CASE WHEN status='pending' THEN 0 WHEN status='failed' THEN 1 ELSE 2 END,created_at,id LIMIT 50",
+        ),
+      };
+    } else if (path === "admin/process-document-jobs" && method === "POST") {
+      admin(request);
+      const input = z
+        .object({
+          ticker: z.string().max(32).optional(),
+          id: z
+            .string()
+            .regex(/^[a-f0-9]{64}$/)
+            .optional(),
+          limit: z.number().int().min(1).max(2).default(1),
+        })
+        .parse(parsedBody);
+      result = await processDocumentJobs(
+        input.limit,
+        input.ticker ? normalizeTicker(input.ticker) : undefined,
+        input.id,
+      );
+    } else if (path === "admin/discover-documents" && method === "POST") {
+      admin(request);
+      const input = tickerInput.parse(parsedBody);
+      const ticker = normalizeTicker(input.ticker);
+      await resolveCompany(ticker);
+      result = await discoverDocuments(ticker);
     } else if (path === "admin/extract-document" && method === "POST") {
       admin(request);
       const input = z
@@ -529,12 +587,14 @@ async function handle(request: Request) {
         .object({
           refresh_market: z.boolean().default(false),
           tickers: z.array(z.string().max(32)).max(30).optional(),
+          owner_after: z.string().max(100).optional(),
         })
         .parse(parsedBody);
       result = await evaluateAll(
         mode,
         input.refresh_market,
         input.tickers?.map(normalizeTicker),
+        input.owner_after,
       );
     } else if (
       (path === "admin/sync-announcements" ||
@@ -547,6 +607,8 @@ async function handle(request: Request) {
           tickers: z.array(z.string().max(32)).max(30).optional(),
           after: z.string().max(32).optional(),
           owner_after: z.string().max(100).optional(),
+          stage: z.enum(["discovery", "ingestion"]).optional(),
+          evaluate: z.boolean().optional(),
         })
         .parse(parsedBody);
       const tickers = input.tickers?.map(normalizeTicker);
@@ -573,6 +635,7 @@ async function handle(request: Request) {
           tickers,
           input.after,
           input.owner_after,
+          { stage: input.stage, evaluate: input.evaluate },
         ),
       };
     } else if (path === "companies/refresh-documents" && method === "POST") {
@@ -610,6 +673,13 @@ async function handle(request: Request) {
     } else if (e instanceof ApiError) {
       status = e.status;
       code = e.code;
+      message = e.message;
+    } else if (
+      e instanceof Error &&
+      /^Invalid (briefing|announcement) cursor$/.test(e.message)
+    ) {
+      status = 422;
+      code = "invalid_cursor";
       message = e.message;
     } else if (
       e instanceof Error &&

@@ -1,3 +1,4 @@
+import { financialLabelSupported } from "../financial-labels.ts";
 import { z } from "zod";
 import { categories, type Metric } from "../domain.ts";
 import { AiFailure, type Transport } from "./gemini.ts";
@@ -114,6 +115,57 @@ export function verifyFinding(
   const evidence = clean(refs.map((s) => s!.text).join(" "));
   const excerpt = clean(f.evidence_excerpt),
     claim = clean(f.claim);
+  // Financial labels and currency cannot be borrowed from an unrelated figure on a page.
+  for (const [term, required] of [
+    [/\bebitda\b/i, /\bebitda\b|earnings before interest.{0,60}depreciation/i],
+    [
+      /operating cash flow|cash from operations/i,
+      /cash.{0,60}operating|operating.{0,60}cash/i,
+    ],
+    [/\bstandalone\b/i, /\bstandalone\b/i],
+    [/\bconsolidated\b/i, /\bconsolidated\b/i],
+  ] as [RegExp, RegExp][]) {
+    if (
+      term.test(claim) &&
+      !required.test(excerpt) &&
+      f.evidence_type !== "calculated"
+    ) {
+      const scoped =
+        /standalone|consolidated/.test(term.source) &&
+        metrics.some(
+          (m) =>
+            m.ticker === ticker &&
+            m.verification_status !== "unverified" &&
+            m.value !== null &&
+            required.test(m.basis) &&
+            numbers(f.claim).includes(m.value) &&
+            refs.some(
+              (s) => s!.document_id === m.document_id && s!.page === m.page,
+            ),
+        );
+      if (!scoped) return false;
+    }
+  }
+  if (
+    /(?:INR|₹|rupee)/i.test(f.claim) &&
+    /(?:USD|US\$)/i.test(f.evidence_excerpt) &&
+    !/(?:INR|₹|rupee)/i.test(f.evidence_excerpt)
+  )
+    return false;
+  if (
+    /\brevenue\b/i.test(f.claim) &&
+    /total income/i.test(f.evidence_excerpt) &&
+    !financialLabelSupported("Revenue", f.evidence_excerpt) &&
+    f.evidence_type !== "calculated"
+  )
+    return false;
+  if (
+    /operating margin/i.test(f.claim) &&
+    /ebitda margin/i.test(f.evidence_excerpt) &&
+    !financialLabelSupported("Operating margin", f.evidence_excerpt) &&
+    f.evidence_type !== "calculated"
+  )
+    return false;
   // Conservative directional/qualifier guards. A literal citation is not entailment.
   if (
     /\b(?:declined|decreased|fell|contracted)\b/.test(excerpt) &&
@@ -276,6 +328,8 @@ export async function analyzeCompanyResearch(
 export const metricExtraction = z.object({
   name: z.enum([
     "Revenue",
+    "Total income",
+    "EBITDA margin",
     "EBITDA",
     "PBT",
     "PAT",
@@ -364,7 +418,7 @@ export async function extractFinancialMetrics(
 ) {
   const response = await transport({
     model,
-    task: "Extract at most 12 explicitly reported financial values and 3 explicit quantified forward guidance statements. Prioritize current quarter revenue, EBITDA, PBT and PAT plus prior quarter and prior-year comparable values, only where reported. Copy short exact excerpts (at most 350 characters) and value_text. Periods MUST use Q4 FY2025 or FY2025 format with four-digit ending year, and only if unambiguous. Include currency/scale in unit and consolidated/standalone plus accounting standard and constant/reported currency in basis. Never derive EBITDA or invent missing facts. Exclude vague optimism. Basis must be supported in the page. Return empty arrays for uncertain facts.",
+    task: "Extract at most 12 explicitly reported financial values and 3 explicit quantified forward guidance statements. Prioritize current quarter revenue, EBITDA, PBT and PAT plus prior quarter and prior-year comparable values, only where reported. Copy short exact excerpts (at most 350 characters) and value_text. Periods MUST use Q4 FY2025 or FY2025 format with four-digit ending year, and only if unambiguous. Include currency/scale in unit and consolidated/standalone plus accounting standard and constant/reported currency in basis. Never derive EBITDA or invent missing facts. Total income is not revenue; use Total income when that is the source label. EBITDA margin is not operating margin. Use Debt for gross/net debt, and Borrowings only when explicitly labelled borrowings. Keep subsidiary and company scopes separate in basis. Exclude vague optimism. Basis must be supported in the page. Return empty arrays for uncertain facts.",
     data: { ticker, sources },
     schema: {
       type: "object",
@@ -410,6 +464,7 @@ export async function extractFinancialMetrics(
     // Retrieval aliases are not accounting equivalences. Operating profit alone
     // cannot establish EBITDA, even when the amount and source ID are genuine.
     const labelContext = clean(m.evidence_excerpt);
+    if (!financialLabelSupported(m.name, m.evidence_excerpt)) return false;
     if (
       m.name === "EBITDA" &&
       !/\bebitda\b|before interest.{0,25}tax.{0,25}depreciation.{0,25}amorti[sz]ation/.test(

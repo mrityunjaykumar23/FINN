@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { readFileSync, mkdtempSync, rmSync } from "node:fs";
+import { readFileSync, readdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 const old = readFileSync(
@@ -115,6 +115,10 @@ function fixture() {
       "utf8",
     ),
   );
+  for (const f of readdirSync("drizzle")
+    .filter((f) => /^000[67].*\.sql$/.test(f))
+    .sort())
+    db.exec(readFileSync("drizzle/" + f, "utf8"));
   return db;
 }
 test("incremental migration works on empty database with enforced foreign keys", () => {
@@ -141,6 +145,10 @@ test("incremental migration works on empty database with enforced foreign keys",
       "utf8",
     ),
   );
+  for (const f of readdirSync("drizzle")
+    .filter((f) => /^000[67].*\.sql$/.test(f))
+    .sort())
+    db.exec(readFileSync("drizzle/" + f, "utf8"));
   assert.equal(db.prepare("PRAGMA foreign_keys").get().foreign_keys, 1);
   assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
   db.close();

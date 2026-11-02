@@ -275,7 +275,7 @@ test("FTS retrieves evidence beyond 2500 chunks directly, with company/period/ty
     "Net profit and cash from operations supported expansion.",
   );
   let p = passageQuery("FIXTURE.NS", "PAT CFO expansion", { period: "FY2026" });
-  let rows = db.prepare(p.sql).all(...p.values);
+  const rows = db.prepare(p.sql).all(...p.values);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].page, 2605);
   assert.equal(rows[0].document_id, "fixture");

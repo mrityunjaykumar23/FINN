@@ -1,3 +1,43 @@
+# Reproducible local demo — final corrections
+
+From the existing project folder, install dependencies once, configure ignored `.dev.vars` with a local `ADMIN_TOKEN` (Gemini is optional for preparation), then run:
+
+```sh
+npm run db:migrate:local
+npm run dev -- --host 127.0.0.1
+```
+
+In another terminal in the same folder:
+
+```sh
+npm run demo:prepare
+```
+
+Open http://127.0.0.1:5173. Preparation uses the fixed checked-in `data/demo-evidence.json`; it does not depend on undocumented local imports or a working remote source today. It adds six authentic original-source documents, 38 source-checked financial values, two HCL guidance statements and eight source-linked events. Some metrics refer to original seed documents. The source hash, publication date where verified, original URL, page text, extraction method and partial/full coverage remain available. The NTPC rating document deliberately has selected-page coverage. This is historical evidence, not a claim of a successful current monitoring check.
+
+The first visitor retains the original 18-company portfolio. Add DMART through Portfolio/Research to watch it; preparing evidence never modifies an existing watchlist or settings. On Research, compare DMart Q4 FY2025 with Q3 FY2025 and Q4 FY2024; on Promises, inspect HCL's original 3–5% and revised 4.5–5% FY2025 CC growth targets against 4.7% reported. In live mode, use a custom October 2026 window to inspect the authentic dated NTPC capacity filings. A calendar date does not become a fabricated exchange publication time.
+
+Preparation is idempotent, inserts only absent records, retains existing data and requires the protected local admin token. Existing conflicting company/hash associations abort rather than overwrite records. Original anonymous ownership and notification lifecycles remain unchanged.
+
+For verification against a separate empty migrated local database, set `FINN_DEMO_TEST_URL` to its localhost production-preview origin and run `npm run test:demo`. This test refuses a populated source database and never resets it. The final local acceptance ran it successfully from an empty database, prepared twice, preserved 18 companies and verified both quarters, guidance comparisons, dated events and zero fabricated monitoring successes.
+
+## Bounded local jobs
+
+These commands read credentials privately from `.dev.vars`:
+
+```sh
+npm run job:local -- discovery --drain
+npm run job:local -- ingestion --drain
+npm run job:local -- evaluate --drain
+npm run job:local -- jobs
+npm run job:local -- retry --drain
+npm run job:local -- evaluate --resume
+```
+
+An optional JSON file after the action can supply `tickers`, `after`, `owner_after`, or a document-job `ticker`, `id` and `limit`. Market refresh is separate: use `market` with a JSON file containing one ticker. Discovery does not import events; ingestion processes already discovered dated candidates without claiming a new source discovery check. Evaluation traverses every owner page. At most 30 calls run per CLI invocation; `.sites-runtime/jobs/` stores checkpoints. `--resume` continues a prior checkpoint; omit it for a fresh scheduled/manual run. Retry jobs respect next-retry dates and stop after three background attempts. There is no cloud scheduler activation.
+
+Original detailed walkthrough (earlier upgrade; manual import examples still supported):
+
 # Local review walkthrough
 
 This upgrade has not been pushed or deployed. Run `npm run db:migrate:local`, configure ignored `.dev.vars`, then `npm run dev -- --host 127.0.0.1`. Open http://127.0.0.1:5173.

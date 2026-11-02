@@ -52,7 +52,9 @@ test("windowed digest separates material filings and lower-priority source conte
   assert.ok(data.events.every((f) => f.score >= 50));
   assert.ok(data.routine.length >= 2);
   assert.ok(data.routine.every((f) => f.score < 50));
-  assert.ok(data.covered_companies >= 2);
+  assert.ok(data.companies_with_events >= 2);
+  assert.equal(data.covered_companies, data.successfully_checked_companies);
+  assert.ok(data.monitored_companies <= 18);
   assert.ok(data.market_alerts.length > 0);
   assert.equal(
     (await request("digest?start=2025-02-01&end=2025-02-02")).data.events

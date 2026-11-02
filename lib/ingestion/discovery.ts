@@ -7,6 +7,9 @@ export type Candidate = {
   officialHost?: string;
   size_bytes?: number | null;
   order: number;
+  extraction_status?: string;
+  indexed_pages?: number | null;
+  total_pages?: number | null;
 };
 export const documentType = (text: string) =>
   /transcript|concall|earnings.call/i.test(text)
@@ -89,11 +92,44 @@ export function rankCandidates(
       : /balance.sheet|cash|debt|annual/i.test(question)
         ? "annual_report"
         : "results");
+  const requested =
+    filters.period ??
+    question
+      .match(/(?:Q[1-4]\s+)?FY\s*\d{4}/i)?.[0]
+      .replace(/FY\s+/i, "FY")
+      .toUpperCase();
+  const tokens = (question.toLowerCase().match(/[a-z]{4,}/g) ?? []).filter(
+    (t) =>
+      !["what", "with", "from", "that", "this", "company", "report"].includes(
+        t,
+      ),
+  );
   const score = (c: Candidate) =>
-    (c.type === preferred ? 100 : 0) +
-    (filters.period && c.period === filters.period ? 80 : 0) +
-    (c.published_at ? 20 : 0) +
-    (c.type === "presentation" ? 5 : 0);
+    (c.type === preferred
+      ? 80
+      : c.type === "annual_report"
+        ? 35
+        : c.type === "transcript"
+          ? 25
+          : c.type === "presentation"
+            ? 15
+            : 0) +
+    (requested ? (c.period === requested ? 160 : c.period ? -100 : 0) : 0) +
+    tokens.filter((t) => c.title.toLowerCase().includes(t)).length * 8 +
+    (c.published_at ? 15 : 0) +
+    (c.extraction_status === "complete" ? 25 : 0) +
+    (c.total_pages && c.indexed_pages
+      ? (20 * c.indexed_pages) / c.total_pages
+      : 0) +
+    (!requested && c.period
+      ? Math.max(
+          0,
+          Math.min(
+            20,
+            (Number(c.period.match(/FY(\d{4})/)?.[1] ?? 0) - 2020) * 2,
+          ),
+        )
+      : 0);
   return [...candidates].sort(
     (a, b) =>
       score(b) - score(a) ||

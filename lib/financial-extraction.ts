@@ -32,6 +32,10 @@ const period = (s: string) => {
   if (q) return `Q${q[1]} FY${fiscal(q[2])}`;
   const y = s.match(/FY\s*['’]?\s*(\d{2,4})/i);
   if (y) return `FY${fiscal(y[1])}`;
+  s = s.replace(
+    /(quarter|year) ended\s+(\d{1,2})\s+(March|June|September|December)\s+(\d{4})/i,
+    "$1 ended $3 $2 $4",
+  );
   const date = s.match(
     /(quarter|year) ended\s+(March|June|September|December)\s+\d{1,2},?\s*(\d{4})/i,
   );
@@ -200,80 +204,109 @@ export function extractExplicitTables(pages: { page: number; text: string }[]) {
       "Capital expenditure",
     ],
     [/^free cash flow$/i, "Free cash flow"],
-    [/^(total debt|borrowings)$/i, "Debt"],
-    [/^(total equity|shareholders.? equity)$/i, "Equity"],
+    [/^(debt|total debt|borrowings)$/i, "Debt"],
+    [/^(equity|total equity|shareholders.? equity)$/i, "Equity"],
   ];
+  const split = (line: string) =>
+    line
+      .split(/\s*\|\s*|\t+| {2,}/)
+      .map((x) => x.trim())
+      .filter(Boolean);
+  let carry: {
+    basis: string;
+    scale: string;
+    periods: string[];
+    page: number;
+  } | null = null;
   for (const page of pages) {
-    const text = page.text;
-    const basis =
-      /\bconsolidated\b/i.test(text) && !/\bstandalone\b/i.test(text)
-        ? "Consolidated reported INR"
-        : /\bstandalone\b/i.test(text) && !/\bconsolidated\b/i.test(text)
-          ? "Standalone reported INR"
-          : null;
-    const units = [
-      ...text.matchAll(/(?:INR|₹|Rs\.?)\s*(crore|million|lakh|billion)s?\b/gi),
-    ];
-    const scales = [...new Set(units.map((m) => m[1].toLowerCase()))];
-    if (!basis || scales.length !== 1) continue;
-    const lines = text.split(/\r?\n/),
-      split = (line: string) =>
-        line
-          .split(/\s*\|\s*|\t+| {2,}/)
-          .map((x) => x.trim())
-          .filter(Boolean);
-    for (let i = 0; i < lines.length; i++) {
-      const header = split(lines[i]),
-        periods = header.slice(1);
-      if (
-        !periods.length ||
-        !periods.every((p) =>
-          /^(?:Q[1-4]\s+)?FY\d{4}(?:\s*\((?:audited|unaudited|restated)\))?$/i.test(
-            p,
-          ),
-        )
+    let basis: string | null = null,
+      scale: string | null = null,
+      periods: string[] | null = null;
+    if (
+      carry &&
+      page.page === carry.page + 1 &&
+      /(?:table|statement|financial results).*continu(?:ed|ation)/i.test(
+        page.text.slice(0, 300),
       )
+    ) {
+      ({ basis, scale, periods } = carry);
+    }
+    for (const line of page.text.split(/\r?\n/)) {
+      const bases = [...line.matchAll(/\b(consolidated|standalone)\b/gi)];
+      if (bases.length) {
+        basis =
+          bases.length === 1
+            ? `${bases[0][1][0].toUpperCase() + bases[0][1].slice(1).toLowerCase()} reported INR`
+            : null;
+        scale = null;
+        periods = null;
+      }
+      const units = [
+        ...line.matchAll(
+          /(?:INR|₹|Rs\.?)\s*(crore|million|lakh|billion)s?\b/gi,
+        ),
+      ];
+      if (units.length) {
+        const unique = [...new Set(units.map((m) => m[1].toLowerCase()))];
+        scale = unique.length === 1 ? unique[0] : null;
+      }
+      const cells = split(line),
+        columns = cells
+          .slice(1)
+          .map((p) => ({ raw: p, normalized: period(p) }));
+      if (
+        columns.length &&
+        columns.every(
+          (p) =>
+            p.normalized &&
+            /^(?:Q[1-4]\s+FY|FY|(?:quarter|year) ended)/i.test(p.raw),
+        )
+      ) {
+        periods = columns.map((p) => p.raw);
         continue;
-      for (let j = i + 1; j < Math.min(lines.length, i + 20); j++) {
-        const cells = split(lines[j]),
-          name = names.find(([re]) => re.test(cells[0] ?? ""))?.[1];
-        if (!name) continue;
-        if (
-          cells.length !== header.length ||
-          !cells.slice(1).every((v) => /^\(?-?[\d,]+(?:\.\d+)?\)?$/.test(v))
-        ) {
-          rejected.push({
-            page: page.page,
-            reason: `${name}: ambiguous or missing table columns; not used in calculations.`,
-          });
-          continue;
-        }
-        for (let k = 0; k < periods.length; k++) {
-          const raw = cells[k + 1],
-            value =
-              Number(raw.replace(/[(),]/g, "")) *
-              (raw.startsWith("(") ? -1 : 1);
-          metrics.push({
-            name,
-            value,
-            period: periods[k].replace(/\s*\([^)]*\)/, "").toUpperCase(),
-            unit: `INR ${scales[0]}`,
-            basis,
-            page: page.page,
-            evidence_text: text,
-            verification_status: "source_checked",
-            extraction_method: "explicit_table_v1",
-            reporting_status: /restated/i.test(periods[k])
-              ? "restated"
-              : /unaudited/i.test(periods[k])
-                ? "unaudited"
-                : /audited/i.test(periods[k])
-                  ? "audited"
-                  : "reported",
-          });
-        }
+      }
+      const name = names.find(([re]) => re.test(cells[0] ?? ""))?.[1];
+      if (!name) continue;
+      if (
+        !basis ||
+        !scale ||
+        !periods ||
+        cells.length !== periods.length + 1 ||
+        !cells.slice(1).every((v) => /^\(?-?[\d,]+(?:\.\d+)?\)?$/.test(v))
+      ) {
+        rejected.push({
+          page: page.page,
+          reason: `${name}: ambiguous scope, unit, period or column; not used in calculations.`,
+        });
+        continue;
+      }
+      for (let k = 0; k < periods.length; k++) {
+        const raw = cells[k + 1];
+        metrics.push({
+          name,
+          value:
+            Number(raw.replace(/[(),]/g, "")) * (raw.startsWith("(") ? -1 : 1),
+          period: period(periods[k])!,
+          unit: `INR ${scale}`,
+          basis,
+          page: page.page,
+          evidence_text: page.text,
+          verification_status: "source_checked",
+          extraction_method: "explicit_table_v2",
+          reporting_status: /restated/i.test(periods[k])
+            ? "restated"
+            : /unaudited/i.test(periods[k])
+              ? "unaudited"
+              : /audited/i.test(periods[k])
+                ? "audited"
+                : "reported",
+        });
       }
     }
+    carry =
+      basis && scale && periods
+        ? { basis, scale, periods, page: page.page }
+        : null;
   }
   return { metrics, rejected };
 }

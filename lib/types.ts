@@ -72,6 +72,12 @@ export type Research = {
   positive_factors?: ResearchFinding[];
 };
 export type ResearchFinding = {
+  evidence_type?:
+    | "reported"
+    | "commentary"
+    | "risk"
+    | "positive"
+    | "calculated";
   text: string;
   source_ids: string[];
   excerpt?: boolean;
@@ -87,6 +93,16 @@ export type GuidanceResult = Guidance & {
   sources: Evidence[];
 };
 export type Digest = {
+  important_count: number;
+  routine_count: number;
+  companies_with_events: number;
+  monitored_companies: number;
+  successfully_checked_companies: number;
+  last_successful_announcement_check: string | null;
+  unavailable_source_companies: string[];
+  never_configured_companies: string[];
+  next_cursor: string | null;
+  next_routine_cursor: string | null;
   mode: string;
   start: string;
   end: string;

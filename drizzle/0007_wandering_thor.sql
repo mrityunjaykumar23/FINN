@@ -1,0 +1,1 @@
+ALTER TABLE `discovery_candidates` ADD `source_timestamp` text;
