@@ -17,6 +17,14 @@
     "note": "Original SBI disclosure table for October-December 2026. Quarterly page registration must be reviewed at the next quarter; no wider historical coverage is claimed."
   },
   {
+    "ticker": "ITC.NS",
+    "provider": "official_itc_disclosures",
+    "layout": "itc_cards",
+    "url": "https://itcportal.com/investors/stock-exchange-announcements.html",
+    "officialHost": "itcportal.com",
+    "note": "Original ITC dated disclosure components, verified 2 November 2026. Only the date paired with each original PDF is used; no exchange timestamp or complete exchange feed is claimed. Historical backlog is bounded and resumable."
+  },
+  {
     "ticker": "MARUTI.NS",
     "provider": "official_maruti_cms",
     "layout": "maruti_cms",

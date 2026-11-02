@@ -1,0 +1,59 @@
+{
+  "ticker": "POLYCAB.NS",
+  "baseline": {
+    "indexed_documents": 0,
+    "metric_records": 0,
+    "ticker_already_validated": true
+  },
+  "job_creation_ms": 79,
+  "total_ms": 40899,
+  "phases": [
+    {
+      "phase": "discovery",
+      "status": "queued",
+      "elapsed_ms": 80,
+      "detail": null
+    },
+    {
+      "phase": "documents",
+      "status": "queued",
+      "elapsed_ms": 1643,
+      "detail": "Primary links discovered. A durable document job will index one original at a time."
+    },
+    {
+      "phase": "extraction",
+      "status": "queued",
+      "elapsed_ms": 3476,
+      "detail": "Original text indexed. Preparing financial extraction without another download."
+    },
+    {
+      "phase": "extraction",
+      "status": "running",
+      "elapsed_ms": 5109,
+      "detail": "Original text indexed. Preparing financial extraction without another download."
+    },
+    {
+      "phase": "analysis",
+      "status": "queued",
+      "elapsed_ms": 15828,
+      "detail": "Indexed text is available; financial extraction needs review: timeout"
+    },
+    {
+      "phase": "synthesis",
+      "status": "running",
+      "elapsed_ms": 17714,
+      "detail": "Preparing grounded research from primary evidence. Matching model output is reused when available."
+    }
+  ],
+  "ai_status": "timeout",
+  "financial": {
+    "status": "extraction_failed",
+    "extraction_status": "gemini_extraction_failed",
+    "error": "timeout"
+  },
+  "accepted_metrics": 0,
+  "source_urls": [
+    "https://www.bseindia.com/stockinfo/AnnPdfOpen.aspx?Pname=77b6d277-0ffc-440d-ba8a-2bd9bc3dc43e.pdf"
+  ],
+  "complete_financial_acceptance": false
+}

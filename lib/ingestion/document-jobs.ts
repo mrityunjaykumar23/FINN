@@ -31,9 +31,10 @@ export async function processDocumentJobs(
   limit = 1,
   ticker?: string,
   id?: string,
+  options: { indexOnly?: boolean } = {},
 ) {
   const now = new Date().toISOString(),
-    expired = new Date(Date.now() - 15 * 60000).toISOString();
+    expired = new Date(Date.now() - 2 * 60000).toISOString();
   const jobs = await all<{
     id: string;
     ticker: string;
@@ -44,7 +45,7 @@ export async function processDocumentJobs(
     attempts: number;
     document_id: string | null;
   }>(
-    `SELECT * FROM document_jobs WHERE attempts<3 AND ((status IN ('pending','failed','extraction_failed') AND (next_retry IS NULL OR next_retry<=?)) OR (status IN ('running','extracting') AND updated_at<?)) ${ticker ? "AND ticker=?" : ""} ${id ? "AND id=?" : ""} ORDER BY created_at,id LIMIT ?`,
+    `SELECT * FROM document_jobs WHERE attempts<3 AND ((status IN ('pending','failed','extraction_failed','extraction_pending') AND (next_retry IS NULL OR next_retry<=?)) OR (status IN ('running','extracting') AND updated_at<?)) ${ticker ? "AND ticker=?" : ""} ${id ? "AND id=?" : ""} ORDER BY created_at,id LIMIT ?`,
     now,
     expired,
     ...(ticker ? [ticker] : []),
@@ -54,7 +55,7 @@ export async function processDocumentJobs(
   const results = [];
   for (const j of jobs) {
     const claimed = await one<{ id: string }>(
-      "UPDATE document_jobs SET status='running',attempts=attempts+1,updated_at=? WHERE id=? AND attempts=? AND (status IN ('pending','failed','extraction_failed') OR (status IN ('running','extracting') AND updated_at<?)) RETURNING id",
+      "UPDATE document_jobs SET status='running',attempts=attempts+1,updated_at=? WHERE id=? AND attempts=? AND (status IN ('pending','failed','extraction_failed','extraction_pending') OR (status IN ('running','extracting') AND updated_at<?)) RETURNING id",
       now,
       j.id,
       j.attempts,
@@ -96,6 +97,20 @@ export async function processDocumentJobs(
         j.ticker,
         j.url,
       );
+      if (options.indexOnly) {
+        await run(
+          "UPDATE document_jobs SET status='extraction_pending',extraction_status='pending',attempts=max(0,attempts-1),next_retry=NULL,updated_at=? WHERE id=?",
+          new Date().toISOString(),
+          j.id,
+        );
+        results.push({
+          id: j.id,
+          status: "extraction_pending",
+          document_id: id,
+          error: null,
+        });
+        continue;
+      }
       const extraction = await extractDocument(j.ticker, id).catch(() => ({
         status: "extraction_failed",
         error_code: "extraction_exception",

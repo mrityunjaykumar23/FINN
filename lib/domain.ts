@@ -73,10 +73,12 @@ export type Filing = {
   event_quote?: string;
   event_scope?: "explicit" | "page_category";
   canonical_event_id?: string;
-  source_provider?:string;
-  publication_precision?:string;
-  publication_timezone?:string;
-  published_at?:string;
+  review_required?: boolean;
+  review_reason?: string;
+  source_provider?: string;
+  publication_precision?: string;
+  publication_timezone?: string;
+  published_at?: string;
   materiality_attributes?: import("./event-analysis.ts").EventAttributes;
   materiality_reasons?: string[];
 };
@@ -220,7 +222,10 @@ export function classify(text: string): {
   rationale: string;
 } {
   const rules: [Category, RegExp][] = [
-    ['unclassified',/(?:intimation|notice).{0,40}board meeting|board meeting.{0,40}(?:consider|scheduled)/i],
+    [
+      "unclassified",
+      /(?:intimation|notice).{0,40}board meeting|board meeting.{0,40}(?:consider|scheduled)/i,
+    ],
     [
       "management_change",
       /(?:ceo|cfo|chief executive|chief financial|managing director|director).{0,60}(?:resign|appoint|retir)|(?:resign|appoint).{0,60}(?:ceo|cfo|director)/i,

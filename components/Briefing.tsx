@@ -19,6 +19,7 @@ import {
   Target,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { publicationLabel } from "@/lib/presentation";
 
 import {
   api,
@@ -139,17 +140,10 @@ export function Briefing({
       <div className="page-heading">
         <div>
           <div className="eyebrow">
-            YOUR DAILY ADVANTAGE <span className="eyebrow-line" />
+            PORTFOLIO INTELLIGENCE <span className="eyebrow-line" />
           </div>
-          <h1>
-            A little less noise.
-            <br />
-            <em>A lot more perspective.</em>
-          </h1>
-          <p>
-            The developments that deserve your attention, with the evidence to
-            decide.
-          </p>
+          <h1>Signal over noise.</h1>
+          <p>Know what changed, why it matters, and what the evidence says.</p>
         </div>
         <div className="edition">
           <span>
@@ -233,14 +227,14 @@ export function Briefing({
           <small>price & volume thresholds</small>
         </div>
         <div>
-          <span>BELOW THE NOISE LINE</span>
+          <span>COMPANIES WITH EVENTS</span>
           <strong>
             {loading
               ? "—"
-              : String(digest?.routine_count ?? 0).padStart(2, "0")}
+              : String(digest?.companies_with_events ?? 0).padStart(2, "0")}
             <ListFilter size={20} />
           </strong>
-          <small>lower-priority updates</small>
+          <small>{digest?.routine_count ?? 0} lower-priority updates</small>
         </div>
         <div className="coverage-stat">
           <span>SUCCESSFULLY CHECKED</span>
@@ -251,18 +245,22 @@ export function Briefing({
           </strong>
           <small>
             {digest?.monitored_companies ?? 0} monitored ·{" "}
-            {digest?.companies_with_events ?? 0} with matching filings
+            {Math.max(0, companies.length - (digest?.covered_companies ?? 0))}{" "}
+            unconfirmed
           </small>
-          <small>
-            Last successful check:{" "}
-            {digest?.last_successful_announcement_check
-              ? date(digest.last_successful_announcement_check)
-              : "not established in this workspace"}
-          </small>
-          <button onClick={onSources}>
-            Know the limitations <ArrowUpRight size={11} />
-          </button>
         </div>
+      </div>
+      <div className="coverage-summary">
+        <span>
+          <ShieldCheck size={14} />
+          Last successful source check:{" "}
+          {digest?.last_successful_announcement_check
+            ? date(digest.last_successful_announcement_check)
+            : "not established"}
+        </span>
+        <button className="text-button" onClick={onSources}>
+          Coverage & limitations <ArrowUpRight size={12} />
+        </button>
       </div>
       <div className="briefing-grid">
         <div className="feed-column">
@@ -316,9 +314,16 @@ export function Briefing({
           ) : (
             <>
               {!digest?.events.length && (
-                <Empty title="No material developments in this window.">
-                  Try a wider window or inspect the lower-priority updates. This
-                  snapshot covers a limited set of primary disclosures.
+                <Empty
+                  title={
+                    mode === "live" && !digest?.covered_companies
+                      ? "Announcement coverage is not established."
+                      : "No important announcements found in this window."
+                  }
+                >
+                  {mode === "live" && !digest?.covered_companies
+                    ? "Sources could not be confirmed checked for this portfolio and window. Missing coverage does not establish that no announcements occurred."
+                    : "Try a wider period or inspect lower-priority updates. Source coverage remains limited to the checks shown above."}
                 </Empty>
               )}
               {digest?.events.map((event, i) => (
@@ -604,7 +609,7 @@ export function SignalCard({
           <FileText size={13} />
           Inspect evidence <ChevronRight size={12} />
         </button>
-        <span>{date(event.date)}</span>
+        <span title={event.date_precision}>{publicationLabel(event)}</span>
         <button className="research-button" onClick={onResearch}>
           Dig deeper <ArrowRight size={13} />
         </button>

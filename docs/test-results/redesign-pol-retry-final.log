@@ -1,0 +1,5 @@
+
+> finn-investment-intelligence@0.1.0 job:local
+> node scripts/run-local-job.mjs retry .sites-runtime/redesign/pol-retry.json
+
+{"http_status":200,"result":{"results":[{"id":"5ae25ebfd2abd5ba5058fd5b097c3c7c6da42f97b25d32148282a53476db4ff6","status":"extraction_failed","document_id":"live-2119d33fa2af9db9f227","extraction":{"metrics":0,"guidance":0,"status":"gemini_extraction_failed","error_code":"timeout"},"error":"timeout"}],"counts":[{"status":"complete","n":2},{"status":"extraction_failed","n":3},{"status":"manual_required","n":4},{"status":"pending","n":566}]}}

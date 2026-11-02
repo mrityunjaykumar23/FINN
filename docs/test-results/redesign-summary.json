@@ -1,0 +1,116 @@
+{
+  "date": "2026-11-03",
+  "branch": "redesign/institutional-intelligence",
+  "tests": [
+    {
+      "suite": "unit",
+      "tests": 81,
+      "passed": 81,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "api",
+      "tests": 17,
+      "passed": 17,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "reliability-api",
+      "tests": 4,
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "ingestion",
+      "tests": 1,
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "research-jobs",
+      "tests": 1,
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "cache",
+      "tests": 1,
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "fresh-demo",
+      "tests": 1,
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "real-gemini-latest",
+      "tests": 3,
+      "passed": 2,
+      "failed": 1,
+      "skipped": 0
+    }
+  ],
+  "totals": {
+    "tests": 109,
+    "passed": 108,
+    "failed": 1,
+    "skipped": 0
+  },
+  "database": {
+    "counts": {
+      "companies": 30,
+      "documents": 48,
+      "document_chunks": 3577,
+      "financial_metrics": 144,
+      "announcements": 26,
+      "owners": 445,
+      "research_jobs": 12,
+      "extraction_audit": 88
+    },
+    "integrity": {
+      "integrity_check": "ok"
+    },
+    "foreign_key_violations": 0,
+    "reviewed_events": [
+      {
+        "id": "cd098597e4a22f551ca6ad3e",
+        "category": "dividend",
+        "verification_status": "review_required"
+      },
+      {
+        "id": "6fe38154d355106a0e39f79b",
+        "category": "M&A",
+        "verification_status": "review_required"
+      }
+    ],
+    "document_job_states": [
+      {
+        "status": "complete",
+        "n": 2
+      },
+      {
+        "status": "extraction_failed",
+        "n": 3
+      },
+      {
+        "status": "manual_required",
+        "n": 4
+      },
+      {
+        "status": "pending",
+        "n": 566
+      }
+    ]
+  },
+  "deployment": "Not deployed or pushed",
+  "readiness": "Local review ready; production sign-off held by intermittent real Gemini failures and incomplete cold financial PULL acceptance"
+}

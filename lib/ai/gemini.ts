@@ -54,15 +54,23 @@ export type Transport = (input: {
 }) => Promise<{ text: string; inputTokens: number; outputTokens: number }>;
 export function geminiTransport(config: AiConfig): Transport {
   if (!aiStatus(config).enabled) throw new AiFailure("not_configured");
-  const ai = new GoogleGenAI({
-    apiKey: config.GEMINI_API_KEY!,
-    httpOptions: { timeout: 25000, retryOptions: { attempts: 1 } },
-  });
+  // A single operation, including transient retries, must fit a bounded Worker phase.
+  let deadline = 0;
   return async ({ model, task, data, schema }) => {
+    deadline ||= Date.now() + 24000;
     if (JSON.stringify(data).length > 90000)
       throw new AiFailure("input_budget_exceeded");
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
+        const remaining = deadline - Date.now();
+        if (remaining < 250) throw new AiFailure("timeout");
+        const ai = new GoogleGenAI({
+          apiKey: config.GEMINI_API_KEY!,
+          httpOptions: {
+            timeout: Math.min(23000, remaining),
+            retryOptions: { attempts: 1 },
+          },
+        });
         const response = await ai.models.generateContent({
           model,
           contents: JSON.stringify({ task, SOURCE_DATA: data }),
@@ -83,7 +91,11 @@ export function geminiTransport(config: AiConfig): Transport {
       } catch (e) {
         const status =
           typeof e === "object" && e && "status" in e ? Number(e.status) : 0;
-        if (attempt < 2 && (status === 429 || status >= 500)) {
+        if (
+          attempt < 2 &&
+          deadline - Date.now() > 1500 &&
+          (status === 429 || status >= 500)
+        ) {
           await new Promise((r) =>
             setTimeout(r, 500 * 2 ** attempt + Math.random() * 150),
           );

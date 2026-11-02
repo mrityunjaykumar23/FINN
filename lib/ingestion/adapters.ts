@@ -95,7 +95,7 @@ export function parseSource(
     title: string,
     date: string | null,
     id?: string,
-    precise = false,
+    recordedTime = false,
   ) => {
     try {
       url = new URL(url.replace(/&amp;/g, "&"), config.url).href;
@@ -109,6 +109,14 @@ export function parseSource(
     )
       return;
     const day = date ? sourceDate(date) : null;
+    const precise =
+      !!day &&
+      recordedTime &&
+      !!date &&
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/.test(
+        date,
+      ) &&
+      Number.isFinite(Date.parse(date));
     found.push({
       ticker: config.ticker,
       provider: config.provider,
@@ -123,7 +131,15 @@ export function parseSource(
           ? "company_recorded_datetime"
           : "date"
         : "unknown",
-      publication_timezone: day ? "Asia/Kolkata" : null,
+      publication_timezone: precise
+        ? date!.endsWith("Z")
+          ? "UTC"
+          : date!.endsWith("+05:30")
+            ? "Asia/Kolkata"
+            : date!.slice(-6)
+        : day
+          ? "Asia/Kolkata"
+          : null,
       verification_status: "official_page",
       discovered_at: now,
       officialHost: config.officialHost,
@@ -150,6 +166,26 @@ export function parseSource(
           !!item.date,
         );
     }
+  } else if (config.layout === "itc_cards") {
+    // Each original component contains its own PDF, date and title. Never borrow a neighbour's date.
+    for (const block of raw
+      .split(
+        /<div\b[^>]*class=["'][^"']*\bgroup_doc_list_box\b[^"']*["'][^>]*>/i,
+      )
+      .slice(1)) {
+      const item = block.split(/<\/section>/i)[0];
+      const link = item.match(
+        /<a\b[^>]*href=["']([^"']+\.pdf(?:[^"']*)?)["']/i,
+      );
+      const date = item.match(
+        /<div\b[^>]*class=["'][^"']*\bgroup_doc_heading_date\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/i,
+      );
+      const title = item.match(
+        /<div\b[^>]*class=["'][^"']*\bgroup_doc_title\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/i,
+      );
+      if (link && title)
+        add(link[1], plain(title[1]), date ? plain(date[1]) : null);
+    }
   } else if (config.layout === "dated_list") {
     for (const m of raw.matchAll(
       /<(?:article|li)\b[^>]*>([\s\S]*?)<\/(?:article|li)>/gi,
@@ -161,7 +197,7 @@ export function parseSource(
       const date = time
         ? (time[1].match(/datetime=["']([^"']+)["']/i)?.[1] ?? plain(time[2]))
         : null;
-      if (link) add(link[1], plain(link[2]), date);
+      if (link) add(link[1], plain(link[2]), date, undefined, !!time);
     }
   } else {
     const rows = [...raw.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)];

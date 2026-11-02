@@ -549,6 +549,30 @@ export const jobLocks = sqliteTable("job_locks", {
   key: text("key").primaryKey(),
   expires_at: text("expires_at").notNull(),
 });
+export const researchJobs = sqliteTable(
+  "research_jobs",
+  {
+    id: text("id").primaryKey(),
+    owner_id: text("owner_id")
+      .notNull()
+      .references(() => owners.id),
+    ticker: text("ticker")
+      .notNull()
+      .references(() => companies.ticker),
+    question: text("question").notNull(),
+    filters: text("filters").notNull(),
+    status: text("status").notNull(),
+    phase: text("phase").notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    document_job_id: text("document_job_id").references(() => documentJobs.id),
+    detail: text("detail"),
+    result: text("result"),
+    error: text("error"),
+    created_at: text("created_at").notNull(),
+    updated_at: text("updated_at").notNull(),
+  },
+  (t) => [index("research_job_owner").on(t.owner_id, t.updated_at)],
+);
 export const meta = sqliteTable("meta", {
   key: text("key").notNull().primaryKey(),
   value: text("value").notNull(),

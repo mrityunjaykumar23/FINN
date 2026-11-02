@@ -21,7 +21,7 @@ export type FilingFilters = {
 };
 export function filingPageQuery(filters: FilingFilters = {}) {
   const clauses: string[] = [
-      "json_extract(payload,'$.canonical_event_id') IS NULL",
+      "json_extract(payload,'$.canonical_event_id') IS NULL AND verification_status<>'review_required'",
     ],
     values: (string | number)[] = [];
   for (const [key, column, op] of [

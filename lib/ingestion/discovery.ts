@@ -11,16 +11,27 @@ export type Candidate = {
   indexed_pages?: number | null;
   total_pages?: number | null;
 };
+export const scheduledCallNotice = (text: string) =>
+  /\b(?:intimation|schedule|invitation|invite|notice)\b.{0,140}\b(?:conference|concall|investor|analyst|earnings|board[ -]meeting)|\b(?:conference|concall|investor|analyst|earnings|board[ -]meeting)\b.{0,140}\b(?:intimation|schedule|invitation|invite|notice)\b/i.test(
+    text.replace(/\s+/g, " "),
+  );
+export const disclosureNotice = (text: string) =>
+  scheduledCallNotice(text) ||
+  /newspaper[ -]publication|(?:audio|video)[ -]recording/i.test(text);
 export const documentType = (text: string) =>
-  /transcript|concall|earnings.call/i.test(text)
+  /transcript/i.test(text)
     ? "transcript"
-    : /annual.report|annual\s+report/i.test(text)
-      ? "annual_report"
-      : /presentation/i.test(text)
-        ? "presentation"
-        : /result|financial.statement/i.test(text)
-          ? "results"
-          : "announcement";
+    : disclosureNotice(text)
+      ? "announcement"
+      : /concall|earnings.call/i.test(text)
+        ? "transcript"
+        : /annual.report|annual\s+report/i.test(text)
+          ? "annual_report"
+          : /presentation/i.test(text)
+            ? "presentation"
+            : /result|financial.statement/i.test(text)
+              ? "results"
+              : "announcement";
 const decode = (s: string) =>
   s
     .replace(/&amp;/g, "&")

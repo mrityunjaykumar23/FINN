@@ -58,7 +58,7 @@ export async function persistFiling(
   const hash = await sha(`${f.ticker}:${doc.hash}:${signature}`),
     score = rank(f, defaultSettings).score;
   const result = await run(
-    `INSERT INTO announcements(id,ticker,hash,document_id,date,payload,headline,category,summary,why_it_matters,published_at,detected_at,source_url,classification_method,classification_confidence,materiality_score,materiality_reason,severity,magnitude,novelty,evidence_coverage,verification_status,ingestion_mode,event_signature,exchange_filing_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET hash=excluded.hash,event_signature=excluded.event_signature,exchange_filing_id=excluded.exchange_filing_id,payload=excluded.payload,headline=excluded.headline,category=excluded.category,summary=excluded.summary,why_it_matters=excluded.why_it_matters,published_at=excluded.published_at,source_url=excluded.source_url,classification_method=excluded.classification_method,classification_confidence=excluded.classification_confidence,materiality_score=excluded.materiality_score,materiality_reason=excluded.materiality_reason,severity=excluded.severity,magnitude=excluded.magnitude,novelty=excluded.novelty,evidence_coverage=excluded.evidence_coverage`,
+    `INSERT INTO announcements(id,ticker,hash,document_id,date,payload,headline,category,summary,why_it_matters,published_at,detected_at,source_url,classification_method,classification_confidence,materiality_score,materiality_reason,severity,magnitude,novelty,evidence_coverage,verification_status,ingestion_mode,event_signature,exchange_filing_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET verification_status=excluded.verification_status,hash=excluded.hash,event_signature=excluded.event_signature,exchange_filing_id=excluded.exchange_filing_id,payload=excluded.payload,headline=excluded.headline,category=excluded.category,summary=excluded.summary,why_it_matters=excluded.why_it_matters,published_at=excluded.published_at,source_url=excluded.source_url,classification_method=excluded.classification_method,classification_confidence=excluded.classification_confidence,materiality_score=excluded.materiality_score,materiality_reason=excluded.materiality_reason,severity=excluded.severity,magnitude=excluded.magnitude,novelty=excluded.novelty,evidence_coverage=excluded.evidence_coverage`,
     f.id,
     f.ticker,
     hash,
@@ -306,7 +306,7 @@ export async function evaluateAlerts(
       }
     }
     const events = await all<{ id: string; payload: string }>(
-      "SELECT id,payload FROM announcements WHERE ticker=? AND ingestion_mode=? AND date>=? AND date<=? AND json_extract(payload,'$.canonical_event_id') IS NULL",
+      "SELECT id,payload FROM announcements WHERE ticker=? AND ingestion_mode=? AND date>=? AND date<=? AND json_extract(payload,'$.canonical_event_id') IS NULL AND verification_status<>'review_required'",
       c.ticker,
       mode,
       start ?? "0000",
@@ -619,7 +619,7 @@ export async function importFiling(input: {
     payload: string;
     event_signature: string;
   }>(
-    "SELECT id,payload,event_signature FROM announcements WHERE ticker=? AND document_id=? AND json_extract(payload,'$.canonical_event_id') IS NULL AND (event_signature=? OR (((?=1 AND event_signature LIKE 'legacy:%') OR (?=1 AND coalesce(json_extract(payload,'$.event_scope'),'page_category')='page_category')) AND category=? AND json_extract(payload,'$.evidence_page')=?)) ORDER BY detected_at,id",
+    "SELECT id,payload,event_signature FROM announcements WHERE ticker=? AND document_id=? AND json_extract(payload,'$.canonical_event_id') IS NULL AND verification_status<>'review_required' AND (event_signature=? OR (((?=1 AND event_signature LIKE 'legacy:%') OR (?=1 AND coalesce(json_extract(payload,'$.event_scope'),'page_category')='page_category')) AND category=? AND json_extract(payload,'$.evidence_page')=?)) ORDER BY detected_at,id",
     input.ticker,
     id,
     signature,

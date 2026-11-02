@@ -6,6 +6,29 @@ export const normalizeEvidence = (text: string) =>
     .toLowerCase()
     .replace(/[^a-z0-9%₹]+/g, " ")
     .trim();
+/** Repair legacy stitched excerpts only by expanding ordered, literal fragments
+ * to one contiguous passage on the same original page. Never invent missing text. */
+export function contiguousEvidence(
+  text: string,
+  excerpt: string,
+): string | null {
+  const flat = (s: string) => s.normalize("NFKC").replace(/\s+/g, " ").trim();
+  if (flat(text).includes(flat(excerpt))) return excerpt;
+  const parts = excerpt
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (parts.length < 2 || parts.some((p) => p.length < 12)) return null;
+  let start = -1,
+    end = 0;
+  for (const part of parts) {
+    const at = text.indexOf(part, end);
+    if (at < 0) return null;
+    if (start < 0) start = at;
+    end = at + part.length;
+  }
+  return end - start <= 10000 ? text.slice(start, end) : null;
+}
 const patterns: Partial<Record<Category, RegExp>> = {
   results: /revenue|profit|ebitda|financial results|margin/i,
   "M&A": /acqui|merger|demerger|transaction|consideration|stake/i,

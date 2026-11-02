@@ -15,6 +15,11 @@ The database is SQLite locally and SQLite-compatible D1 in the retained hosted a
 7. `0006_stiff_enchantress.sql`: source discovery/processing provenance, source/run progress details, retry/manual-review counters and durable bounded `document_jobs`.
 8. `0007_wandering_thor.sql`: retain the exact optional company-recorded source timestamp independently of the calendar publication date.
 
+9. `0008_orange_winter_soldier.sql`: separate document-job extraction status/result from text indexing.
+10. `0009_brave_the_stranger.sql`: add only the `research_jobs` table and owner/time index, with foreign keys to existing owners, companies and optional document jobs. No existing table is rebuilt or cleared.
+
+The redesign also applies idempotent, audited data corrections: unsupported automatically inferred events are retained for review, recoverable stitched excerpts are expanded to contiguous original-page passages, and call/recording/newspaper notices are distinguished from actual financial results or transcripts. Sources, earlier excerpts, alert lifecycle rows and visitor preferences are retained. Document-type corrections use existing revision triggers to invalidate affected research caches.
+
 A one-time definition review v4 retains earlier Gemini Revenue/Operating margin/Borrowings rows as unverified, with an audit record, when their own accepted excerpt does not establish that accounting label. Total income is not revenue, EBITDA margin is not operating margin, and gross debt is not automatically borrowings. No source/history record is deleted.
 
 The migration journal and Drizzle snapshots are tracked. Do not modify already applied SQL. No financial records, watchlists or preferences are reset by migration.

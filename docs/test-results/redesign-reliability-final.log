@@ -1,0 +1,16 @@
+
+> finn-investment-intelligence@0.1.0 test:reliability-api
+> node --test tests/reliability-api.test.mjs
+
+✔ authentic same-page results and dividend retain separate event IDs after alternate-headline reimport (455.9943ms)
+✔ new authentic NTPC source reaches personalized live briefing, source inspection and durable alert (245.271ms)
+✔ announcement cursor and direct lookup preserve company and mode filters (101.935ms)
+✔ ticker, ordinary name and partial name search expose verified directory and library metadata (92.635ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 985.2396

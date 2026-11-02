@@ -24,7 +24,8 @@
     "test:reliability-api": "node --test tests/reliability-api.test.mjs",
     "test:cache": "node --test tests/cache.integration.test.mjs",
     "demo:prepare": "node scripts/prepare-demo.mjs",
-    "test:demo": "node --test tests/demo.integration.test.mjs"
+    "test:demo": "node --test tests/demo.integration.test.mjs",
+    "test:research-jobs": "node --test tests/research-jobs.integration.test.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

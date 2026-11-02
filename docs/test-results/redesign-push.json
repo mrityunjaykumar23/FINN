@@ -1,0 +1,36 @@
+{
+  "passed": true,
+  "result": [
+    {
+      "ticker": "ITC.NS",
+      "id": "84aa6b921c367962be57e292",
+      "date": "2026-11-02",
+      "precision": "date",
+      "category": "M&A",
+      "score": 71.5,
+      "source": "https://itcportal.com/content/dam/itc-corporate/stock-exchange-/2026/lodr-02nov26b.pdf",
+      "page": 3
+    },
+    {
+      "ticker": "SBIN.NS",
+      "id": "87d6964cc60f21401e1baef7",
+      "date": "2026-10-29",
+      "precision": "date",
+      "category": "unclassified",
+      "score": 49.5,
+      "source": "https://sbi.bank.in/documents/17826/17948/491_02112026.pdf/19dd4e2d-d87e-f38c-00f7-bf60319d5739?t=1793604056354",
+      "page": 1
+    },
+    {
+      "ticker": "NTPC.NS",
+      "id": "50f496d26b38198e68923adc",
+      "date": "2026-10-30",
+      "precision": "date",
+      "category": "capex",
+      "score": 63.5,
+      "source": "https://ntpc.co.in/sites/default/files/announcement/2026/2026-10/2021030_NGELCOD.pdf",
+      "page": 1
+    }
+  ],
+  "alert_dismissal_persisted": true
+}

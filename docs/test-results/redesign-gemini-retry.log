@@ -1,0 +1,29 @@
+
+> finn-investment-intelligence@0.1.0 test:gemini
+> node --experimental-strip-types --test tests/gemini.integration.test.ts
+
+✔ real Gemini grounded research on an authentic Infosys source (21551.2587ms)
+✔ real Gemini guidance analysis preserves authentic source evidence (19168.9197ms)
+✖ real Gemini risk analysis preserves authentic source evidence (22519.1722ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 2
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 63658.2348
+
+✖ failing tests:
+
+test at tests\gemini.integration.test.ts:57:3
+✖ real Gemini risk analysis preserves authentic source evidence (22519.1722ms)
+  Error: provider_failed
+      at file:///C:/Users/mrity/Downloads/Enam_holding/finn/lib/ai/gemini.ts:105:15
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async analyzeCompanyResearch (file:///C:/Users/mrity/Downloads/Enam_holding/finn/lib/ai/provider.ts:270:20)
+      at async TestContext.<anonymous> (file:///C:/Users/mrity/Downloads/Enam_holding/finn/tests/gemini.integration.test.ts:98:22)
+      at async Test.run (node:internal/test_runner/test:1125:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:787:7) {
+    code: 'provider_failed'
+  }

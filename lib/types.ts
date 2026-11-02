@@ -50,6 +50,8 @@ export type Document = {
   indexed_pages?: number;
   total_pages?: number;
   period_status?: string;
+  financial_extraction_status?: string | null;
+  financial_extraction_error?: string | null;
 };
 export type Research = {
   ticker: string;

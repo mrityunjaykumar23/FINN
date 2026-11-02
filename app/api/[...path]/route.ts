@@ -6,7 +6,13 @@ import { importFileBatch } from "@/lib/ingestion/local-file";
 import { searchCompanies } from "@/lib/company-search";
 import { companySyncBatch } from "@/lib/query-plans";
 import { z } from "zod";
-import { env } from "cloudflare:workers";
+import { env, waitUntil } from "cloudflare:workers";
+import {
+  createResearchJob,
+  researchJob,
+  claimResearchJob,
+  runResearchPhase,
+} from "@/lib/research-jobs";
 import {
   initialize,
   ownerFor,
@@ -157,13 +163,17 @@ async function handle(request: Request) {
       method === "POST" &&
       [
         "research",
+        "research/jobs",
         "market/refresh",
         "portfolio",
         "companies/refresh-documents",
       ].includes(path)
     ) {
-      await budget(`session:${owner}:${path}`, path === "research" ? 40 : 12);
-      await budget(`global:${path}`, path === "research" ? 200 : 60);
+      await budget(
+        `session:${owner}:${path}`,
+        path.startsWith("research") ? 40 : 12,
+      );
+      await budget(`global:${path}`, path.startsWith("research") ? 200 : 60);
     }
     let result: unknown;
     if (path === "health" && method === "GET")
@@ -328,7 +338,7 @@ async function handle(request: Request) {
         event_type: string;
         triggered_at: string;
       }>(
-        `SELECT * FROM alerts WHERE owner=? AND NOT EXISTS (SELECT 1 FROM announcements a WHERE a.id=alerts.announcement_id AND json_extract(a.payload,'$.canonical_event_id') IS NOT NULL) ${status ? "AND status=?" : ""} ORDER BY triggered_at DESC LIMIT 100`,
+        `SELECT * FROM alerts WHERE owner=? AND NOT EXISTS (SELECT 1 FROM announcements a WHERE a.id=alerts.announcement_id AND (json_extract(a.payload,'$.canonical_event_id') IS NOT NULL OR a.verification_status='review_required')) ${status ? "AND status=?" : ""} ORDER BY triggered_at DESC LIMIT 100`,
         owner,
         ...(status ? [status] : []),
       );
@@ -426,7 +436,7 @@ async function handle(request: Request) {
           ticker,
         ),
         documents: await all<Omit<Document, "pages">>(
-          "SELECT * FROM documents WHERE ticker=?",
+          "SELECT d.*,j.status financial_extraction_status,j.error financial_extraction_error FROM documents d LEFT JOIN document_jobs j ON j.ticker=d.ticker AND j.url=d.url WHERE d.ticker=?",
           ticker,
         ),
         points: await getPoints(ticker, mode),
@@ -440,6 +450,28 @@ async function handle(request: Request) {
         guidance: await guidanceFor(ticker),
         mode,
       };
+    } else if (path === "research/jobs" && method === "POST") {
+      const input = questionSchema.parse(parsedBody),
+        ticker = normalizeTicker(input.ticker);
+      await resolveCompany(ticker);
+      result = await createResearchJob(owner, ticker, input.question, {
+        ...(input.type && { type: input.type }),
+        ...(input.period && { period: input.period }),
+      });
+    } else if (
+      /^research\/jobs\/[a-f0-9]{64}$/.test(path) &&
+      method === "GET"
+    ) {
+      result = await researchJob(owner, path.split("/")[2]);
+    } else if (
+      /^research\/jobs\/[a-f0-9]{64}\/advance$/.test(path) &&
+      method === "POST"
+    ) {
+      await budget(`research-advance:${owner}`, 180);
+      const id = path.split("/")[2],
+        job = await claimResearchJob(owner, id);
+      if (job) waitUntil(runResearchPhase(job));
+      result = await researchJob(owner, id);
     } else if (path === "research" && method === "POST") {
       const input = questionSchema.parse(parsedBody),
         ticker = normalizeTicker(input.ticker);

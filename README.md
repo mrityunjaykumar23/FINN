@@ -2,6 +2,8 @@
 
 FINN turns primary company disclosures and stored end-of-day observations into a portfolio briefing, evidence-grounded company research, and management guidance comparisons. No login or signup.
 
+The latest **Institutional Intelligence redesign** is local on **`redesign/institutional-intelligence`**. It adds the FINN. navy/teal identity, self-hosted Geist, responsive research reports and durable research status jobs. See [the redesign and final local test report](docs/INSTITUTIONAL_REDESIGN_REPORT.md). Review the production build at [localhost:5173](http://127.0.0.1:5173). These visual/backend changes have **not been deployed or pushed**.
+
 The production-readiness upgrade is on **`staging/enam-verification`**. An isolated [owner-private staging preview](https://finn-enam-staging-mrity.hazyanole2049.chatgpt.site) runs the existing Worker/D1 application. The [public repository](https://github.com/mrityunjaykumar23/FINN) and [public demo](https://finn-investment-intelligence-mrity.hazyanole2049.chatgpt.site) remain unchanged pending approval. No GitHub push has been made for this upgrade. See [staging verification](docs/STAGING_VERIFICATION_REPORT.md) and [staging operations](docs/STAGING_OPERATIONS.md).
 
 The final corrections and current acceptance results are in [FINAL_CORRECTIONS_REPORT.md](docs/FINAL_CORRECTIONS_REPORT.md). For a reproducible offline source demo, run `npm run demo:prepare` after migration and starting localhost; see [DEMO.md](docs/DEMO.md).
@@ -90,7 +92,10 @@ Management guidance is stored in SQLite, including targets/ranges, periods, unit
 | PATCH | `/api/alerts/{id}` | `status`: unread, read or dismissed |
 | POST | `/api/alerts/evaluate` | Evaluate this visitor's stored data |
 | GET | `/api/companies/search?q=...`, `/api/companies/{ticker}/overview` | Ticker resolution and source/metric overview |
-| POST | `/api/research` | Ticker/question with optional period/type |
+| POST | `/api/research` | Existing synchronous ticker/question route with optional period/type |
+| POST | `/api/research/jobs` | Create or resume a visitor-owned durable research request |
+| GET | `/api/research/jobs/{id}` | Saved phase, source/extraction status and completed report |
+| POST | `/api/research/jobs/{id}/advance` | Run one bounded phase using the existing Worker runtime |
 | POST | `/api/companies/refresh-documents` | Bounded source discovery with cooldown |
 | GET | `/api/guidance`, `/api/research/{ticker}/guidance` | Database-backed comparisons |
 | POST | `/api/admin/ingest-document`, `/api/admin/ingest-announcements` | Protected primary-source import |
@@ -107,7 +112,10 @@ npm run build
 npm run test:api
 npm run test:gemini
 npm run test:ingestion
+npm run test:research-jobs
 py scripts/validate-financials.py
+py scripts/validate-dynamic.py
+py scripts/validate-retrieved.py
 ```
 
 The real Gemini test is opt-in through local server credentials and explicitly skipped without them. HTTP upgrade mutation tests accept localhost only. Test fixtures are isolated from the browser watchlist. See [actual verification evidence](docs/VERIFICATION.md), [architecture](docs/ARCHITECTURE.md), [AI pipeline](docs/AI_PIPELINE.md), [limitations](docs/KNOWN_LIMITATIONS.md), and [local demo](docs/DEMO.md).
@@ -124,6 +132,12 @@ npm run test:reliability-api
 py scripts/validate-retrieved.py
 ```
 
-Jobs return company and owner continuation cursors. Pass `after` and `owner_after` in the optional JSON input to resume. NTPC and SBI use verified dated tables; Maruti uses its official structured CMS endpoint. Discovery continuation and the stored candidate queue preserve older filings. Two filings per company are processed per bounded ingestion request. Sources without authoritative dates require review, and source failures remain explicit. Coverage is limited to registered sources and their stated scopes.
+Jobs return company and owner continuation cursors. Pass `after` and `owner_after` in the optional JSON input to resume. NTPC and SBI use verified dated tables; Maruti uses its official structured CMS endpoint; ITC uses individually dated original-disclosure cards on its official investor page. Discovery continuation and the stored candidate queue preserve older filings. Two filings per company are processed per bounded ingestion request. Sources without authoritative dates require review, and source failures remain explicit. Coverage is limited to registered sources and their stated scopes.
 
 Large original files can be processed with `node scripts/import-local-pdf.mjs manifest.json`; see [the walkthrough](docs/DEMO.md). `npm run test:cache` requires `FINN_CACHE_TEST_URL` pointing at a fresh isolated localhost test database; it never clears existing guidance. All ordinary mutation tests are restricted to localhost.
+
+### Durable research progress
+
+The React research form now creates a saved request, polls its owner-scoped status and advances one bounded phase at a time: discovery, indexing, financial extraction and synthesis. Repeated questions reuse existing original files and matching successful model results. Closing the page pauses advancement between phases; submitting the question again resumes saved work. In-flight Worker work uses `waitUntil`, not a separate queue service. Failures, retry windows and manual financial review remain visible; successful PDF text indexing is not described as completed financial extraction.
+
+Use `node scripts/verify-local-push.mjs` for stored authentic local PUSH acceptance. `node scripts/verify-async-research.mjs TICKER.NS --require-financial` verifies real Gemini, original-page citations, accepted financial metrics, job completion and cross-route cache reuse; a fallback fails this acceptance check. Only localhost origins are accepted. A genuinely cold test must first establish that the company has no indexed documents; repeated runs are warm retries.

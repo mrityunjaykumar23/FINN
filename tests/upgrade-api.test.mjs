@@ -151,6 +151,20 @@ test("saving alert rules does not regenerate historical or live notifications; r
   });
   assert.equal(saved.status, 200);
   assert.deepEqual((await req("alerts", owner)).data.alerts, before);
+  for (const threshold of [7.5, 4.5, 0.1]) {
+    assert.equal(
+      (
+        await req("alerts/settings", owner, "PUT", {
+          ...settings,
+          price_threshold: threshold,
+          volume_multiplier: 1,
+          min_priority: 0,
+        })
+      ).status,
+      200,
+    );
+    assert.deepEqual((await req("alerts", owner)).data.alerts, before);
+  }
   assert.equal(
     (await req("alerts/evaluate?mode=historical", owner, "POST", {})).status,
     200,

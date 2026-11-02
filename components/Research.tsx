@@ -11,14 +11,11 @@ import {
   ArrowUpRight,
   BarChart3,
   Check,
-  ChevronDown,
   FileText,
-  Info,
   Plus,
   RefreshCw,
   Search,
   ShieldCheck,
-  Sparkles,
   Target,
 } from "lucide-react";
 import {
@@ -54,6 +51,36 @@ import {
 
 import { sortPeriods } from "@/lib/periods";
 import { SystemStatus } from "./SystemStatus";
+import { ResearchAnswer } from "./ResearchReport";
+import { FinnAvatar } from "./Brand";
+import { financialNumber } from "@/lib/presentation";
+type ResearchJobState = {
+  id: string;
+  ticker: string;
+  status: string;
+  phase: string;
+  detail: string | null;
+  error: string | null;
+  updated_at: string;
+  result: Research | null;
+};
+async function pause(signal: AbortSignal) {
+  await new Promise<void>((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new DOMException("Aborted", "AbortError"));
+      return;
+    }
+    const cancel = () => {
+      clearTimeout(timer);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", cancel);
+      resolve();
+    }, 1500);
+    signal.addEventListener("abort", cancel, { once: true });
+  });
+}
 type Overview = {
   market_freshness?: {
     status: string;
@@ -105,19 +132,64 @@ export function ResearchView({
     [chartType, setChartType] = useState("price"),
     [metricPeriod, setMetricPeriod] = useState("");
   const answerRef = useRef<HTMLDivElement>(null);
+  const activeRequest = useRef<AbortController | null>(null);
+  const [job, setJob] = useState<ResearchJobState | null>(null);
+  useEffect(
+    () => () => {
+      activeRequest.current?.abort();
+    },
+    [ticker, mode],
+  );
   const ask = useCallback(
     async (q: string, filters: { type?: string; period?: string } = {}) => {
+      activeRequest.current?.abort();
+      const controller = new AbortController();
+      activeRequest.current = controller;
       setAsking(true);
+      setJob(null);
+      setAnswer(null);
       setError("");
       setQuestion(q);
       try {
-        const data = await api<Research>("research", {
+        let state = await api<ResearchJobState>("research/jobs", {
           method: "POST",
+          signal: controller.signal,
           body: JSON.stringify({ ticker, question: q, ...filters }),
         });
-        setAnswer(data);
+        for (let poll = 0; poll < 150; poll++) {
+          if (controller.signal.aborted) return;
+          setJob(state);
+          if (state.status === "complete" && state.result) {
+            setAnswer(state.result);
+            break;
+          }
+          if (state.status === "failed")
+            throw new Error(
+              state.error ?? "Research preparation needs source review.",
+            );
+          if (
+            state.status === "queued" ||
+            Date.now() - Date.parse(state.updated_at) > 90000
+          ) {
+            state = await api<ResearchJobState>(
+              `research/jobs/${state.id}/advance`,
+              { method: "POST", body: "{}", signal: controller.signal },
+            );
+            setJob(state);
+          }
+          await pause(controller.signal);
+          state = await api<ResearchJobState>(`research/jobs/${state.id}`, {
+            signal: controller.signal,
+          });
+          if (poll === 149)
+            throw new Error(
+              "Research is still queued. Its saved status will be resumed when you investigate this question again.",
+            );
+        }
+        if (controller.signal.aborted) return;
         const updated = await api<Overview>(
           `companies/${encodeURIComponent(ticker)}/overview?mode=${mode}`,
+          { signal: controller.signal },
         );
         setOverview(updated);
         setMetricPeriod((current) =>
@@ -130,9 +202,9 @@ export function ResearchView({
               ""),
         );
       } catch (e) {
-        setError((e as Error).message);
+        if (!controller.signal.aborted) setError((e as Error).message);
       } finally {
-        setAsking(false);
+        if (activeRequest.current === controller) setAsking(false);
       }
     },
     [ticker, mode],
@@ -249,6 +321,7 @@ export function ResearchView({
     "Does cash flow support reported profitability?",
     "What did management guide for future margins?",
     "What were the major risks mentioned in the annual report?",
+    "Explain profitability trends using comparable quarters.",
   ];
   const activeMetrics =
     overview?.metrics.filter((m) => m.period === metricPeriod) ?? [];
@@ -256,12 +329,8 @@ export function ResearchView({
     <>
       <div className="page-heading compact">
         <div>
-          <div className="eyebrow">YOUR PRIMARY-SOURCE RESEARCH DESK</div>
-          <h1>
-            Go beyond
-            <br />
-            <em>the headline.</em>
-          </h1>
+          <div className="eyebrow">FINN RESEARCH WORKSPACE</div>
+          <h1>Research with conviction.</h1>
           <p>
             Ask a better question. Follow it back to the company’s own words.
           </p>
@@ -321,11 +390,13 @@ export function ResearchView({
             <div className="research-grid">
               <div className="research-main">
                 <section className="question-panel">
-                  <div className="mini-eyebrow">
-                    <Sparkles size={14} />
-                    ASK FINN
+                  <div className="research-identity">
+                    <FinnAvatar />
+                    <div>
+                      <h3>FINN Research.</h3>
+                      <p>What would you like to understand?</p>
+                    </div>
                   </div>
-                  <h3>What would you like to understand?</h3>
                   <form
                     onSubmit={(e: FormEvent) => {
                       e.preventDefault();
@@ -421,17 +492,57 @@ export function ResearchView({
                 </section>
                 <div ref={answerRef}>
                   {asking ? (
-                    <div className="answer-loading">
-                      <Sparkles size={19} />
-                      <strong>Following the evidence…</strong>
-                      <p>
-                        Retrieving relevant passages and checking source
-                        references.
+                    <div
+                      className="job-progress"
+                      role="status"
+                      aria-live="polite"
+                    >
+                      <div className="job-progress-header">
+                        <FinnAvatar />
+                        <div>
+                          <h3>
+                            {job
+                              ? "Following the evidence"
+                              : "Submitting your research request"}
+                          </h3>
+                          <p>
+                            {job?.detail ??
+                              "Preparing a saved research request."}
+                          </p>
+                        </div>
+                      </div>
+                      <ol>
+                        {[
+                          ["discovery", "Finding company sources"],
+                          ["documents", "Retrieving and indexing originals"],
+                          ["extraction", "Extracting relevant financial facts"],
+                          ["analysis", "Analysing metrics and source passages"],
+                          ["synthesis", "Generating grounded research"],
+                        ].map(([phase, label]) => (
+                          <li
+                            key={phase}
+                            className={job?.phase === phase ? "active" : ""}
+                          >
+                            <span className="phase-dot" />
+                            {label}
+                            {job?.phase === phase && (
+                              <span className="sr-only"> · active</span>
+                            )}
+                          </li>
+                        ))}
+                      </ol>
+                      <p className="table-note">
+                        Existing sources are reused. Progress reflects the saved
+                        server state.
                       </p>
-                      <Skeleton rows={2} />
                     </div>
                   ) : (
-                    answer && <ResearchAnswer answer={answer} />
+                    answer && (
+                      <ResearchAnswer
+                        answer={answer}
+                        documents={overview.documents}
+                      />
+                    )
                   )}
                 </div>
                 <section className="price-panel">
@@ -466,21 +577,27 @@ export function ResearchView({
                             margin={{ top: 12, right: 12, bottom: 0, left: 0 }}
                           >
                             <CartesianGrid
-                              stroke="#263231"
+                              stroke="var(--finn-border)"
                               strokeDasharray="3 5"
                               vertical={false}
                             />
                             <XAxis
                               dataKey="date"
                               tickFormatter={(d) => d.slice(5)}
-                              tick={{ fill: "#7f908a", fontSize: 10 }}
+                              tick={{
+                                fill: "var(--finn-text-secondary)",
+                                fontSize: 12,
+                              }}
                               minTickGap={45}
                               axisLine={false}
                               tickLine={false}
                             />
                             <YAxis
                               domain={["auto", "auto"]}
-                              tick={{ fill: "#7f908a", fontSize: 10 }}
+                              tick={{
+                                fill: "var(--finn-text-secondary)",
+                                fontSize: 12,
+                              }}
                               width={58}
                               tickFormatter={(v) => `₹${Math.round(v)}`}
                               axisLine={false}
@@ -488,10 +605,10 @@ export function ResearchView({
                             />
                             <Tooltip
                               contentStyle={{
-                                background: "#19221f",
-                                border: "1px solid #34413b",
+                                background: "var(--finn-card)",
+                                border: "1px solid var(--finn-border)",
                                 borderRadius: 6,
-                                color: "#ebece3",
+                                color: "var(--finn-text)",
                               }}
                               labelFormatter={(label) => date(String(label))}
                               formatter={(value) => [
@@ -502,9 +619,9 @@ export function ResearchView({
                             <Area
                               type="linear"
                               dataKey="adjusted_close"
-                              stroke="#91b7a2"
+                              stroke="var(--finn-accent)"
                               strokeWidth={2}
-                              fill="#91b7a2"
+                              fill="var(--finn-accent)"
                               fillOpacity={0.09}
                               isAnimationActive={false}
                             />
@@ -515,20 +632,26 @@ export function ResearchView({
                             margin={{ top: 12, right: 12, bottom: 0, left: 0 }}
                           >
                             <CartesianGrid
-                              stroke="#263231"
+                              stroke="var(--finn-border)"
                               strokeDasharray="3 5"
                               vertical={false}
                             />
                             <XAxis
                               dataKey="date"
                               tickFormatter={(d) => d.slice(5)}
-                              tick={{ fill: "#7f908a", fontSize: 10 }}
+                              tick={{
+                                fill: "var(--finn-text-secondary)",
+                                fontSize: 12,
+                              }}
                               minTickGap={45}
                               axisLine={false}
                               tickLine={false}
                             />
                             <YAxis
-                              tick={{ fill: "#7f908a", fontSize: 10 }}
+                              tick={{
+                                fill: "var(--finn-text-secondary)",
+                                fontSize: 12,
+                              }}
                               width={58}
                               tickFormatter={(v) =>
                                 `${(v / 1000000).toFixed(1)}m`
@@ -538,8 +661,8 @@ export function ResearchView({
                             />
                             <Tooltip
                               contentStyle={{
-                                background: "#19221f",
-                                border: "1px solid #34413b",
+                                background: "var(--finn-card)",
+                                border: "1px solid var(--finn-border)",
                                 borderRadius: 6,
                               }}
                               formatter={(v) => [
@@ -549,7 +672,7 @@ export function ResearchView({
                             />
                             <Bar
                               dataKey="volume"
-                              fill="#9ca991"
+                              fill="var(--finn-accent-blue)"
                               radius={[2, 2, 0, 0]}
                               isAnimationActive={false}
                             />
@@ -626,7 +749,7 @@ export function ResearchView({
                           {m?.value == null ? (
                             <small>Not reported</small>
                           ) : (
-                            `${m.unit.startsWith("INR") ? "₹" : m.unit.startsWith("USD") ? "$" : ""}${num(m.value, 0)}`
+                            `${m.unit.startsWith("INR") ? "₹" : m.unit.startsWith("USD") ? "$" : ""}${financialNumber(m.value)}`
                           )}
                         </strong>
                         {m && doc && (
@@ -684,9 +807,18 @@ export function ResearchView({
                         <span>Indexed {date(d.retrieved_at)}</span>
                         {d.extraction_status && (
                           <span>
-                            {d.extraction_status} extraction ·{" "}
+                            {d.extraction_status} text indexing ·{" "}
                             {d.indexed_pages ?? "?"}/{d.total_pages ?? "?"}{" "}
                             pages · period {d.period_status ?? "unverified"}
+                          </span>
+                        )}
+                        {d.financial_extraction_status && (
+                          <span>
+                            Financial extraction:{" "}
+                            {d.financial_extraction_status.replaceAll("_", " ")}
+                            {d.financial_extraction_error
+                              ? ` · ${d.financial_extraction_error}`
+                              : ""}
                           </span>
                         )}
                         <SourceLink url={d.url}>
@@ -716,126 +848,4 @@ export function ResearchView({
   );
 }
 
-export function ResearchAnswer({ answer }: { answer: Research }) {
-  return (
-    <section className="research-answer">
-      <div className="answer-heading">
-        <span>
-          <Sparkles size={16} />
-          The evidence brief
-        </span>
-        <span className="badge neutral">{answer.confidence} coverage</span>
-      </div>
-      <p className="answer-summary">{answer.summary}</p>
-      <div className="answer-engine">
-        <span className="status-dot" />
-        {answer.engine}
-        {answer.cached && <span> · cached result</span>}
-      </div>
-      {answer.ai_status && (
-        <p className="muted">
-          AI execution: {answer.ai_status}
-          {answer.generated_at
-            ? ` · ${new Date(answer.generated_at).toLocaleString()}`
-            : ""}
-        </p>
-      )}
-      {[
-        ...answer.key_findings,
-        ...(answer.management_commentary ?? []).map((f) => ({
-          ...f,
-          text: `Management commentary: ${f.text}`,
-        })),
-        ...(answer.positive_factors ?? []).map((f) => ({
-          ...f,
-          text: `Positive case: ${f.text}`,
-        })),
-        ...(answer.risks ?? []).map((f) => ({
-          ...f,
-          text: `Risk case: ${f.text}`,
-        })),
-      ].map((finding, i) => (
-        <details
-          className="finding"
-          key={`${answer.question}-${i}`}
-          open={i === 0}
-        >
-          <summary>
-            <span className="finding-index">
-              {String(i + 1).padStart(2, "0")}
-            </span>
-            <div>
-              <strong>
-                {answer.source_references.find(
-                  (s) => s.id === finding.source_ids[0],
-                )?.title ?? "Source-grounded finding"}
-              </strong>
-              <span>
-                {finding.source_ids
-                  .map((id) => {
-                    const s = answer.source_references.find((s) => s.id === id);
-                    return s ? `${id} · PDF p.${s.page} · ${s.period}` : id;
-                  })
-                  .join(" / ")}
-              </span>
-            </div>
-            <ChevronDown size={14} />
-          </summary>
-          <div className="finding-body">
-            <p className="muted">
-              {finding.excerpt
-                ? "Primary source excerpt"
-                : finding.evidence_type === "calculated"
-                  ? "Calculated metric"
-                  : finding.evidence_type === "commentary"
-                    ? "Management commentary"
-                    : finding.evidence_type === "reported"
-                      ? "Reported fact · source checks applied"
-                      : "Interpretation · inspect supporting evidence"}
-            </p>
-            <div
-              className={
-                finding.excerpt || answer.engine.startsWith("Source retrieval")
-                  ? "source-excerpt"
-                  : ""
-              }
-            >
-              {finding.text}
-            </div>
-            {finding.evidence_excerpt && (
-              <blockquote className="source-excerpt">
-                {finding.evidence_excerpt}
-              </blockquote>
-            )}
-            {finding.uncertainty_note && (
-              <p className="muted">{finding.uncertainty_note}</p>
-            )}
-            <div className="finding-links">
-              {finding.source_ids.map((id) => {
-                const source = answer.source_references.find(
-                  (s) => s.id === id,
-                );
-                return source ? (
-                  <SourceLink key={id} url={source.url}>
-                    {id} · Inspect original PDF page {source.page}
-                  </SourceLink>
-                ) : null;
-              })}
-            </div>
-          </div>
-        </details>
-      ))}
-      <details className="limitations">
-        <summary>
-          <Info size={14} />
-          Evidence limitations <ChevronDown size={13} />
-        </summary>
-        <ul>
-          {answer.limitations.map((l, i) => (
-            <li key={i}>{l}</li>
-          ))}
-        </ul>
-      </details>
-    </section>
-  );
-}
+export { ResearchAnswer } from "./ResearchReport";

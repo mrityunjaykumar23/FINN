@@ -2,7 +2,7 @@ import { type Category } from "./domain.ts";
 const rules: Partial<Record<Category, RegExp>> = {
   results: /revenue|profit (?:after|before) tax|\bPAT\b|\bEBITDA\b/i,
   dividend:
-    /(?:declared|recommend\w*|propos\w*|approved).{0,100}dividend|dividend.{0,100}(?:per share|₹|Rs\.?|INR)/i,
+    /\b(?:declar\w*|recommend\w*|propos\w*|approv\w*)\b.{0,100}\bdividend\b|\bdividend\b.{0,100}\b(?:declared|recommended|proposed|approved)\b/i,
   management_change:
     /(?:chief|CFO|CEO|director|managing).{0,140}(?:resign|appoint|retir|cessation)|(?:resign|appoint|retir|cessation).{0,140}(?:chief|CFO|CEO|director|managing)/i,
   "M&A":
@@ -19,6 +19,22 @@ export function supportsEvent(category: Category, text: string) {
     rules[category] ?? new RegExp(category.replaceAll("_", "[ .-]"), "i")
   ).test(text.replace(/\s+/g, " "));
 }
+/** Financial notes often recap earlier transactions. Keep those for review unless
+ * the disclosure's own title identifies a transaction announcement. */
+export function automatedEventSupported(
+  category: Category,
+  text: string,
+  headline: string,
+) {
+  if (!supportsEvent(category, text)) return false;
+  if (
+    category === "M&A" &&
+    /financial|results/i.test(headline) &&
+    !/acqui|merger|demerger|amalgamat|scheme|joint venture/i.test(headline)
+  )
+    return false;
+  return true;
+}
 export type MatchedEvent = {
   category: Category;
   page: number;
@@ -34,6 +50,14 @@ export function matchFilingEvents(
     Category,
     RegExp,
   ][]) {
+    if (
+      !automatedEventSupported(
+        category,
+        pages.map((p) => p.text).join(" "),
+        headline,
+      )
+    )
+      continue;
     const scored = pages
       .filter((p) => supportsEvent(category, p.text))
       .map((p) => {

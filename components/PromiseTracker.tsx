@@ -12,6 +12,11 @@ import {
   Target,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import {
+  financialNumber,
+  guidanceScale,
+  guidanceTone,
+} from "@/lib/presentation";
 
 import {
   api,
@@ -43,11 +48,7 @@ export function PromiseTracker({
           <div className="eyebrow">
             <Target size={14} /> MANAGEMENT PROMISE TRACKER
           </div>
-          <h1>
-            The words.
-            <br />
-            <em>Then, the numbers.</em>
-          </h1>
+          <h1>Promises, measured.</h1>
           <p>
             Compare explicit numerical guidance with comparable reported
             results.
@@ -163,9 +164,7 @@ export function GuidanceCard({
             </span>
           </div>
         </div>
-        <span
-          className={`badge ${g.variance === null ? "neutral" : g.variance < 0 ? "critical" : "verified"}`}
-        >
+        <span className={`badge ${guidanceTone(g.status, g.variance)}`}>
           {g.status}
         </span>
       </div>
@@ -173,7 +172,7 @@ export function GuidanceCard({
         <div className="guidance-statement">
           <div className="mini-eyebrow">01 / THE GUIDANCE</div>
           <strong>
-            {g.low}–{g.high}
+            {financialNumber(g.low)}–{financialNumber(g.high)}
             <small>
               {/^(%|percent|percentage)$/i.test(g.unit ?? "%")
                 ? "%"
@@ -186,14 +185,14 @@ export function GuidanceCard({
           </p>
           <span>
             {g.stated_at
-              ? `Stated ${g.stated_at.slice(0, 10)} → target ${g.period}`
+              ? `Stated ${g.stated_at.replace(/T\d{2}:\d{2}.*$/, "")} → target ${g.period}`
               : `${g.sources[0]?.period} · Statement date unverified`}
           </span>
         </div>
         <div className="guidance-statement actual">
           <div className="mini-eyebrow">02 / THE REPORTED RESULT</div>
           <strong>
-            {g.actual ?? "Unavailable"}
+            {financialNumber(g.actual)}
             <small>
               {g.actual == null
                 ? ""
@@ -211,7 +210,11 @@ export function GuidanceCard({
           <div className="mini-eyebrow">THE DIFFERENCE</div>
           <strong
             className={
-              g.variance !== null && g.variance < 0 ? "negative" : "positive"
+              g.variance === null
+                ? "muted"
+                : g.variance < 0
+                  ? "negative"
+                  : "positive"
             }
           >
             {g.variance === null ? (
@@ -232,6 +235,16 @@ export function GuidanceCard({
           <p>{g.explanation}</p>
         </div>
       </div>
+      {g.actual !== null &&
+        g.variance !== null &&
+        guidanceTone(g.status, g.variance) !== "neutral" && (
+          <GuidanceRange
+            low={g.low}
+            high={g.high}
+            actual={g.actual}
+            unit={g.unit ?? "%"}
+          />
+        )}
       <div className="guidance-qualifier">
         <Info size={14} />
         <p>{g.qualifier}</p>
@@ -264,5 +277,48 @@ export function GuidanceCard({
         Ask what sits behind the numbers <ArrowUpRight size={15} />
       </button>
     </article>
+  );
+}
+
+function GuidanceRange({
+  low,
+  high,
+  actual,
+  unit,
+}: {
+  low: number;
+  high: number;
+  actual: number;
+  unit: string;
+}) {
+  const scale = guidanceScale(low, high, actual);
+  return (
+    <div
+      className="guidance-range"
+      role="img"
+      aria-label={`Guidance ${low} to ${high} ${unit}; actual ${actual} ${unit}. Axis ${financialNumber(scale.min)} to ${financialNumber(scale.max)}.`}
+    >
+      <div className="range-label">
+        Comparable result · same period and basis
+      </div>
+      <div className="range-track">
+        <span
+          className="range-band"
+          style={{
+            left: `${scale.start}%`,
+            width: `${Math.max(scale.width, 1)}%`,
+          }}
+        />
+        <span className="range-actual" style={{ left: `${scale.actual}%` }} />
+      </div>
+      <div className="range-legend">
+        <span>
+          Guidance {financialNumber(low)}–{financialNumber(high)} {unit}
+        </span>
+        <span>
+          Actual {financialNumber(actual)} {unit}
+        </span>
+      </div>
+    </div>
   );
 }

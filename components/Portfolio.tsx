@@ -220,11 +220,7 @@ export function Portfolio({
       <div className="page-heading compact">
         <div>
           <div className="eyebrow">THE COMPANIES YOU FOLLOW</div>
-          <h1>
-            Your portfolio.
-            <br />
-            <em>One considered view.</em>
-          </h1>
+          <h1>Your investment universe.</h1>
           <p>
             A watchlist for intelligence, with daily closing prices and source
             freshness.
@@ -322,7 +318,7 @@ export function Portfolio({
                 </span>
               </div>
               <span
-                className={`holding-change mono ${(c.change ?? 0) < 0 ? "negative" : "positive"}`}
+                className={`holding-change mono ${c.change == null ? "muted" : c.change < 0 ? "negative" : "positive"}`}
               >
                 {pct(c.change)}
               </span>

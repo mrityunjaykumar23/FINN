@@ -4,14 +4,14 @@ import { quarterlyComparisons } from "@/lib/periods";
 import type { Metric, RankedFiling } from "@/lib/types";
 import { ArrowUpRight, BarChart3, ChevronDown, FileText } from "lucide-react";
 import { useEffect, useState } from "react";
+import { financialNumber, publicationLabel } from "@/lib/presentation";
 
 import {
   api,
-  date,
   ErrorBox,
+  Empty,
   labels,
   Modal,
-  num,
   pct,
   SourceLink,
   TickerIcon,
@@ -48,11 +48,17 @@ export function EventDetail({
       </div>
       <h1 className="detail-title">{data.headline}</h1>
       <p className="detail-meta">
-        {date(data.date)} · {labels[data.category]}
+        {publicationLabel(data)} · {labels[data.category]}
         <br />
         {data.date_precision}
       </p>
       {error && <ErrorBox message={error} />}
+      {data.review_required && (
+        <div className="provider-notice" role="status">
+          Event requires review. {data.review_reason} The original source and
+          record are retained.
+        </div>
+      )}
       <div className="detail-summary">
         <h3>What changed</h3>
         <p>{data.summary}</p>
@@ -164,6 +170,13 @@ export function FinancialTable({
 }) {
   const comparisons = quarterlyComparisons(metrics);
   const periods = comparisons[0].periods;
+  if (!periods.length)
+    return (
+      <Empty title="No comparable quarterly facts available.">
+        Inspect the original disclosure. Missing financial values and periods
+        are not inferred.
+      </Empty>
+    );
   return (
     <section className="financial-section">
       <h3>The quarter, in numbers</h3>
@@ -204,17 +217,21 @@ export function FinancialTable({
                     <td key={i}>
                       {m?.value == null ? (
                         <span className="not-reported">Not reported</span>
-                      ) : (
+                      ) : sourceUrls[m.document_id] ? (
                         <a
                           href={`${sourceUrls[m.document_id]}#page=${m.page}`}
                           target="_blank"
                           rel="noreferrer"
                           title={`${m.period} · ${m.basis} · PDF page ${m.page}`}
-                          aria-label={`${name}, ${m.period}: ${num(m.value, 0)} ${m.unit}, ${m.basis}; open source page ${m.page}`}
+                          aria-label={`${name}, ${m.period}: ${financialNumber(m.value)} ${m.unit}, ${m.basis}; open source page ${m.page}`}
                         >
-                          {num(m.value, 0)}
+                          {financialNumber(m.value)}
                           <sup>{m.page}</sup>
                         </a>
+                      ) : (
+                        <span title="Original document link unavailable">
+                          {financialNumber(m.value)}
+                        </span>
                       )}
                     </td>
                   ))}

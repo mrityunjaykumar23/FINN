@@ -8,7 +8,12 @@ import {
   exchangeDate,
   type DailyObservation,
 } from "../lib/market-sessions.ts";
-import { matchFilingEvents, supportsEvent } from "../lib/event-evidence.ts";
+import {
+  matchFilingEvents,
+  supportsEvent,
+  automatedEventSupported,
+} from "../lib/event-evidence.ts";
+import { contiguousEvidence } from "../lib/event-analysis.ts";
 import {
   parseSource,
   sourceDate,
@@ -469,6 +474,59 @@ test("multi-page evidence selects actual financial page and separate exact divid
     assert.ok(pages.find((p) => p.page === e.page)!.text.includes(e.quote));
   assert.equal(supportsEvent("dividend", pages[0].text), false);
 });
+test("cash-flow dividends and historical transaction notes do not become new automatic events", () => {
+  const cash =
+    "Consolidated Statement of Cash Flows. Dividend Income (15.14). Others 22.00. Dividend paid (10026.20).";
+  assert.equal(supportsEvent("dividend", cash), false);
+  assert.equal(
+    supportsEvent(
+      "dividend",
+      "The Board has declared an interim dividend of INR 2 per share.",
+    ),
+    true,
+  );
+  const note =
+    "The acquisition was completed in a prior year and approved by the Board.";
+  assert.equal(
+    automatedEventSupported(
+      "M&A",
+      note,
+      "Integrated Filing (Financial) Q2 FY2026",
+    ),
+    false,
+  );
+  assert.equal(automatedEventSupported("M&A", note, "Scheme of merger"), true);
+  assert.ok(
+    !matchFilingEvents(
+      [{ page: 1, text: cash }],
+      "Financial results Q2 FY2026",
+    ).some((e) => e.category === "dividend"),
+  );
+});
+
+test("legacy excerpt repair expands ordered original fragments and rejects invented or reversed fragments", () => {
+  const page =
+    "Commercial operation of 95.6 MW solar capacity.\nProject location and effective date are disclosed here.\nTotal installed capacity is 91,668 MW.";
+  const quote =
+    "Commercial operation of 95.6 MW solar capacity.\nTotal installed capacity is 91,668 MW.";
+  assert.equal(contiguousEvidence(page, quote), page);
+  assert.equal(
+    contiguousEvidence(
+      page,
+      "Invented disclosure that is absent.\nTotal installed capacity is 91,668 MW.",
+    ),
+    null,
+  );
+  assert.equal(
+    contiguousEvidence(page, quote.split("\n").reverse().join("\n")),
+    null,
+  );
+  assert.equal(
+    contiguousEvidence(page, "Total installed capacity is 91,668 MW."),
+    "Total installed capacity is 91,668 MW.",
+  );
+});
+
 test("source adapters keep dates tied to exact rows/objects and retain undated records for review", () => {
   const config = {
     ticker: "FIXTURE.NS",
@@ -550,4 +608,32 @@ test("discovery resumes every older record while checking the new head", async (
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+import { documentType } from "../lib/ingestion/discovery.ts";
+test("conference-call invitations are not results PDFs or completed transcripts", () => {
+  assert.equal(documentType("Newspaper Publication of Audited Financial Results"), "announcement");
+  assert.equal(documentType("Audio recording of the earnings call on financial results"), "announcement");
+  assert.equal(
+    documentType(
+      "Announcement under Regulation 30 (LODR)-Analyst / Investor Meet - Intimation regarding schedule of investors and analysts results conference call for the quarter and half-year ended September 30, 2026.",
+    ),
+    "announcement",
+  );
+  assert.equal(
+    documentType("Earnings Call Invitation Q2 FY2027"),
+    "announcement",
+  );
+  assert.equal(
+    documentType("Board Meeting Intimation for Financial Results"),
+    "announcement",
+  );
+  assert.equal(
+    documentType("Intimation of the earnings call transcript Q2 FY2027"),
+    "transcript",
+  );
+  assert.equal(
+    documentType("Unaudited Financial Results Q2 FY2027"),
+    "results",
+  );
 });

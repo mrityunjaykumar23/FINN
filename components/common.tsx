@@ -14,6 +14,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
+export { Logo } from "./Brand";
 
 export type View = "today" | "portfolio" | "research" | "promises" | "settings";
 export const navigation: { id: View; label: string; icon: typeof Activity }[] =
@@ -78,26 +79,6 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
       value.error?.message ?? "The request could not be completed.",
     );
   return value as T;
-}
-export function Logo() {
-  return (
-    <div className="brand">
-      <span className="brand-mark" aria-hidden="true">
-        <svg viewBox="0 0 30 30">
-          <path
-            d="M7 22V8h16M7 15h11"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="3"
-          />
-          <path d="m16 24 7-7" stroke="currentColor" strokeWidth="3" />
-        </svg>
-      </span>
-      <span>
-        finn<span className="brand-dot">.</span>
-      </span>
-    </div>
-  );
 }
 export function TickerIcon({
   ticker,

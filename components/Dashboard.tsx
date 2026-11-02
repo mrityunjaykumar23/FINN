@@ -6,7 +6,6 @@ import {
   ArrowUpRight,
   Bell,
   CheckCircle2,
-  ChevronDown,
   ChevronRight,
   Info,
   Search,
@@ -23,6 +22,7 @@ import { CompanySearch, Portfolio } from "./Portfolio";
 import { PromiseTracker } from "./PromiseTracker";
 import { ResearchView } from "./Research";
 import { SourceDiscipline } from "./SourceDiscipline";
+import { FinnMark } from "./Brand";
 export default function Dashboard() {
   const [view, setView] = useState<View>("today"),
     [mode, setMode] = useState("historical"),
@@ -86,14 +86,15 @@ export default function Dashboard() {
       </a>
       <aside className="sidebar">
         <Logo />
-        <div className="brand-caption">INVESTMENT INTELLIGENCE</div>
+        <div className="brand-caption">Financial Investment Agent</div>
         <div className="workspace-switch">
-          <span className="workspace-avatar">M</span>
+          <span className="workspace-avatar">
+            <FinnMark />
+          </span>
           <div>
             <strong>My investment desk</strong>
-            <span>Personal workspace</span>
+            <span>Anonymous workspace</span>
           </div>
-          <ChevronDown size={13} />
         </div>
         <div className="nav-caption">YOUR WORKSPACE</div>
         <nav aria-label="Main navigation">
@@ -106,13 +107,12 @@ export default function Dashboard() {
             >
               <Icon size={18} />
               <span>{label}</span>
-              {id === "promises" && <span className="new-tag">NEW</span>}
             </button>
           ))}
         </nav>
         <div className="sidebar-note">
           <ShieldCheck size={22} />
-          <strong>Evidence, before opinion.</strong>
+          <strong>Evidence before opinion.</strong>
           <p>
             Every insight starts with a company disclosure. Every source is
             yours to inspect.
@@ -149,6 +149,10 @@ export default function Dashboard() {
             My investment desk <ChevronRight size={13} />
             <span>{navigation.find((n) => n.id === view)?.label}</span>
           </div>
+          <span className="header-mode">
+            <span className="status-dot" />
+            {mode === "historical" ? "Replay · Apr 2025" : "Live sources"}
+          </span>
           <button
             className="global-search"
             aria-label="Research any NSE company"
@@ -166,10 +170,9 @@ export default function Dashboard() {
             aria-label="Alert settings"
           >
             <Bell size={19} />
-            <span className="notification-dot" />
           </button>
           <span className="user-avatar" aria-label="Personal workspace">
-            M
+            <FinnMark />
           </span>
         </header>
         <main id="main-content" className={`content view-${view}`}>
@@ -266,7 +269,7 @@ export default function Dashboard() {
           )}
           <footer className="page-footer">
             <Logo />
-            <span>Primary sources. Clearer decisions.</span>
+            <span>Signal over noise.</span>
             <button onClick={() => setShowSources(true)}>
               Data & methodology <ArrowUpRight size={11} />
             </button>

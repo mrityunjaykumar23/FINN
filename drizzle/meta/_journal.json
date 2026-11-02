@@ -64,6 +64,13 @@
       "when": 1793613887560,
       "tag": "0008_orange_winter_soldier",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1793640127890,
+      "tag": "0009_brave_the_stranger",
+      "breakpoints": true
     }
   ]
 }

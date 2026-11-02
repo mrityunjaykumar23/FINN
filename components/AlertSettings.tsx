@@ -74,11 +74,7 @@ export function AlertSettings({
       <div className="page-heading compact">
         <div>
           <div className="eyebrow">YOUR ATTENTION, YOUR RULES</div>
-          <h1>
-            Define
-            <br />
-            <em>the unusual.</em>
-          </h1>
+          <h1>Define the unusual.</h1>
           <p>
             Decide what earns an interruption. FINN checks the stored data for
             you.
@@ -90,7 +86,7 @@ export function AlertSettings({
         </span>
       </div>
       <Notifications />
-      <SystemStatus />
+      <SystemStatus compact />
       {error && <ErrorBox message={error} />}{" "}
       {!settings ? (
         <Skeleton rows={3} />

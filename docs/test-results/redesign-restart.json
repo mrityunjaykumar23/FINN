@@ -1,0 +1,9 @@
+{
+  "passed": true,
+  "portfolio_persisted": true,
+  "settings_persisted": true,
+  "queued_research_persisted": true,
+  "unchanged_alert_history": true,
+  "owner_isolation": true,
+  "isolated_test_portfolio_restored": true
+}

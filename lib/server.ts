@@ -1,5 +1,8 @@
 import { extractionOutcome, publicationMetadata } from "./pipeline-state";
 import { financialLabelSupported, revenueContext } from "./financial-labels";
+import { automatedEventSupported } from "./event-evidence";
+import { contiguousEvidence } from "./event-analysis";
+import { canonicalResearchFilters } from "./research-filters";
 import {
   completedSessions,
   exchangeDate,
@@ -27,6 +30,7 @@ import {
   locatePrimaryCandidates,
   rankCandidates,
   documentType,
+  disclosureNotice,
 } from "./ingestion/discovery";
 import announcementSources from "../data/announcement-sources.json";
 import { inferHeaderPeriod } from "./financial-extraction";
@@ -115,6 +119,8 @@ async function annotateSeed() {
     );
 }
 async function reconcileStagingAudit() {
+  await reconcileDocumentKinds();
+  await reconcileEventEvidence();
   if (
     !(await one("SELECT value FROM meta WHERE key='source-context-review-v1'"))
   ) {
@@ -180,6 +186,110 @@ async function reconcileStagingAudit() {
   );
   await run(
     "INSERT OR IGNORE INTO meta(key,value) VALUES ('staging-audit-v1','complete')",
+  );
+}
+async function reconcileDocumentKinds() {
+  if (
+    await one(
+      "SELECT value FROM meta WHERE key='document-notice-type-review-v2'",
+    )
+  )
+    return;
+  const docs = await all<{ id: string; title: string; type: string }>(
+    "SELECT id,title,type FROM documents WHERE mode='live' AND type IN ('results','transcript')",
+  );
+  for (const d of docs.filter(
+    (d) =>
+      disclosureNotice(d.title) && documentType(d.title) === "announcement",
+  )) {
+    await db().batch([
+      db()
+        .prepare("UPDATE documents SET type='announcement' WHERE id=?")
+        .bind(d.id),
+      db()
+        .prepare(
+          "INSERT INTO extraction_audit(id,document_id,method,status,reason,created_at) VALUES (?,?,?,?,?,?)",
+        )
+        .bind(
+          crypto.randomUUID(),
+          d.id,
+          "document_notice_type_review_v2",
+          "metadata_corrected",
+          JSON.stringify({
+            previous_type: d.type,
+            type: "announcement",
+            reason:
+              "Call invitations, recording notices and newspaper-publication disclosures are not the original results or transcript itself. Original document and extraction history retained.",
+          }),
+          new Date().toISOString(),
+        ),
+    ]);
+  }
+  for (const table of ["document_jobs", "discovery_candidates"] as const) {
+    const candidates = await all<{ id: string; title: string }>(
+      `SELECT id,title FROM ${table} WHERE type IN ('results','transcript')`,
+    );
+    for (const c of candidates.filter(
+      (c) =>
+        disclosureNotice(c.title) && documentType(c.title) === "announcement",
+    ))
+      await run(`UPDATE ${table} SET type='announcement' WHERE id=?`, c.id);
+  }
+  await run(
+    "INSERT OR IGNORE INTO meta(key,value) VALUES ('document-notice-type-review-v2','complete')",
+  );
+}
+async function reconcileEventEvidence() {
+  if (await one("SELECT value FROM meta WHERE key='event-evidence-review-v1'"))
+    return;
+  const rows = await all<{ id: string; document_id: string; payload: string }>(
+    "SELECT id,document_id,payload FROM announcements WHERE json_extract(payload,'$.event_quote') IS NOT NULL AND json_extract(payload,'$.canonical_event_id') IS NULL AND verification_status<>'review_required'",
+  );
+  for (const row of rows) {
+    const f = JSON.parse(row.payload) as Filing;
+    const doc = await getDocument(row.document_id);
+    const page = doc?.pages.find((p) => p.page === f.evidence_page);
+    const quote = page ? contiguousEvidence(page.text, f.event_quote!) : null;
+    const automatic =
+      !!f.source_provider && f.source_provider !== "verified_admin";
+    const reason = !quote
+      ? "The stored excerpt cannot be established as one passage on the cited page."
+      : automatic && !automatedEventSupported(f.category, quote, f.headline)
+        ? "The passage does not establish a new event of this category; financial-note references require review."
+        : null;
+    if (!reason && quote === f.event_quote) continue;
+    const updated = {
+      ...f,
+      ...(quote ? { event_quote: quote } : {}),
+      ...(reason ? { review_required: true, review_reason: reason } : {}),
+    };
+    await db().batch([
+      db()
+        .prepare(
+          "UPDATE announcements SET payload=?,verification_status=CASE WHEN ?=1 THEN 'review_required' ELSE verification_status END WHERE id=?",
+        )
+        .bind(JSON.stringify(updated), reason ? 1 : 0, row.id),
+      db()
+        .prepare(
+          "INSERT INTO extraction_audit(id,document_id,method,status,reason,created_at) VALUES (?,?,?,?,?,?)",
+        )
+        .bind(
+          crypto.randomUUID(),
+          row.document_id,
+          "event_evidence_review_v1",
+          reason ? "review_required" : "excerpt_expanded",
+          JSON.stringify({
+            announcement_id: row.id,
+            original_excerpt: f.event_quote,
+            corrected_excerpt: quote,
+            reason,
+          }),
+          new Date().toISOString(),
+        ),
+    ]);
+  }
+  await run(
+    "INSERT OR IGNORE INTO meta(key,value) VALUES ('event-evidence-review-v1','complete')",
   );
 }
 let initialization: Promise<void> | null = null;
@@ -471,7 +581,7 @@ export async function portfolioFor(owner: string, mode = "historical") {
       mode,
     ),
     all<{ ticker: string; n: number }>(
-      "SELECT a.ticker,count(*) n FROM announcements a JOIN portfolio_companies p ON p.ticker=a.ticker WHERE p.owner=? AND a.ingestion_mode=? AND json_extract(a.payload,'$.canonical_event_id') IS NULL AND a.severity>=20 GROUP BY a.ticker",
+      "SELECT a.ticker,count(*) n FROM announcements a JOIN portfolio_companies p ON p.ticker=a.ticker WHERE p.owner=? AND a.ingestion_mode=? AND json_extract(a.payload,'$.canonical_event_id') IS NULL AND a.verification_status<>'review_required' AND a.severity>=20 GROUP BY a.ticker",
       owner,
       mode,
     ),
@@ -496,7 +606,7 @@ export async function getFilings(
   } = {},
 ) {
   const clauses: string[] = [
-      "json_extract(payload,'$.canonical_event_id') IS NULL",
+      "json_extract(payload,'$.canonical_event_id') IS NULL AND verification_status<>'review_required'",
     ],
     values: (string | number)[] = [];
   for (const [key, column, op] of [
@@ -782,6 +892,7 @@ export async function research(
   ticker: string,
   question: string,
   filters: { period?: string; type?: string } = {},
+  options: { prepared?: boolean; onSynthesis?: () => Promise<void> } = {},
 ): Promise<Research> {
   const docs = await all<Omit<Document, "pages">>(
     "SELECT * FROM documents WHERE ticker=? ORDER BY published_at DESC",
@@ -796,10 +907,11 @@ export async function research(
     !discoveryState?.last_attempt ||
     Date.parse(discoveryState.last_attempt) < Date.now() - 86400000;
   if (
-    !docs.length ||
-    (!!filters.type && !docs.some((d) => d.type === filters.type)) ||
-    (stale &&
-      !(filters.period && docs.some((d) => d.period === filters.period)))
+    !options.prepared &&
+    (!docs.length ||
+      (!!filters.type && !docs.some((d) => d.type === filters.type)) ||
+      (stale &&
+        !(filters.period && docs.some((d) => d.period === filters.period))))
   ) {
     const discovery = await discoverDocuments(ticker, { question, ...filters });
     missing.push(...discovery.limitations);
@@ -817,7 +929,7 @@ export async function research(
       "SELECT count(*) n FROM financial_metrics WHERE ticker=? AND verification_status<>'unverified'",
       ticker,
     );
-    if (!count?.n)
+    if (!options.prepared && !count?.n)
       for (const d of docs.slice(0, 2))
         await extractDocument(ticker, d.id).catch(() =>
           missing.push(
@@ -877,7 +989,7 @@ export async function research(
       ticker,
       version,
       question: question.trim().toLowerCase(),
-      filters,
+      filters: canonicalResearchFilters(filters),
       retrieval: RETRIEVAL_VERSION,
       enabled: config.enabled,
       model: config.model,
@@ -1022,6 +1134,7 @@ export async function research(
   output.ai_status = config.enabled ? "insufficient_evidence" : "offline";
   if (config.enabled && refs.length) {
     try {
+      await options.onSynthesis?.();
       const answer = await synthesizeResearch(
         ticker,
         question,
@@ -1253,7 +1366,12 @@ export function safeSourceUrl(raw: string, officialHost?: string) {
 }
 export async function discoverDocuments(
   ticker: string,
-  task: { question?: string; type?: string; period?: string } = {},
+  task: {
+    question?: string;
+    type?: string;
+    period?: string;
+    queueOnly?: boolean;
+  } = {},
 ) {
   try {
     return await trackSync("document_discovery", ticker, async () => {
@@ -1286,7 +1404,12 @@ export async function discoverDocuments(
 }
 async function discoverDocumentsWork(
   ticker: string,
-  task: { question?: string; type?: string; period?: string },
+  task: {
+    question?: string;
+    type?: string;
+    period?: string;
+    queueOnly?: boolean;
+  },
 ) {
   const limitations: string[] = [];
   const { candidates } = await locatePrimaryCandidates(ticker, safeSourceUrl);
@@ -1331,8 +1454,12 @@ async function discoverDocumentsWork(
     }),
     task.question,
     task,
-  );
-  // At most four documents per interactive refresh; pending/failed candidates remain resumable.
+  ).filter((c) => !task.type || c.type === task.type);
+  if (task.type && !ranked.length)
+    limitations.push(
+      `No permitted original ${task.type.replaceAll("_", " ")} was found in the current directory. Choose another document type or import a verified original.`,
+    );
+  // Pending/failed candidates remain resumable; one original is processed per interactive request.
   const pending = [];
   const { enqueueDocument } = await import("./ingestion/document-jobs");
   for (const c of ranked) {
@@ -1361,9 +1488,19 @@ async function discoverDocumentsWork(
         (job.next_retry && job.next_retry > new Date().toISOString()))
     )
       continue;
-    await enqueueDocument(ticker, c);
-    pending.push(c);
+    const job_id = await enqueueDocument(ticker, c);
+    pending.push({ ...c, job_id });
   }
+  if (task.queueOnly)
+    return {
+      limitations,
+      indexed: 0,
+      failed: 0,
+      candidates: candidates.length,
+      discovered: candidates.length,
+      status: "queued",
+      job_ids: pending.slice(0, 2).map((c) => c.job_id),
+    };
   let indexedCount = 0,
     failed = 0;
   // One bounded download during an interactive refresh. Everything else is durably queued.
