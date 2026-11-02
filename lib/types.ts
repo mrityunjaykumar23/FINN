@@ -7,6 +7,9 @@ import type {
   Guidance,
 } from "./domain";
 export type Company = {
+  market_freshness?: ReturnType<typeof import("./market-state").marketFreshness>;
+  prior_sessions?: number;
+  relative_volume_status?: string;
   ticker: string;
   name: string;
   sector: string;

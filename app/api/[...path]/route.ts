@@ -1,4 +1,16 @@
 import { scheduledStep } from "@/lib/scheduled-jobs";
+import {
+  queueMarketRefresh,
+  runMarketRefresh,
+  portfolioTickers,
+} from "@/lib/market-refresh";
+import {
+  snapshotState,
+  createSnapshot,
+  claimSnapshot,
+  runSnapshot,
+} from "@/lib/financial-snapshot";
+import { marketFreshness, type MarketSync } from "@/lib/market-state";
 import { prepareDemo } from "@/lib/demo";
 import { processDocumentJobs } from "@/lib/ingestion/document-jobs";
 import { syncAnnouncements } from "@/lib/ingestion/announcements";
@@ -215,7 +227,36 @@ async function handle(request: Request) {
         company.ticker,
         new Date().toISOString(),
       );
-      result = { company, message: "Company added to your portfolio." };
+      // Membership is committed first. A provider failure cannot undo a valid addition.
+      let market_refresh;
+      try {
+        market_refresh = await queueMarketRefresh([company.ticker]);
+        if (market_refresh.queued.length)
+          waitUntil(runMarketRefresh(market_refresh.queued));
+      } catch {
+        market_refresh = {
+          queued: [],
+          pending: 1,
+          error:
+            "Market refresh unavailable; the company remains in your portfolio.",
+        };
+      }
+      result = {
+        company,
+        market_refresh,
+        message: "Company added to your portfolio.",
+      };
+    } else if (path === "portfolio/refresh-market" && method === "POST") {
+      await budget(`portfolio-market:${owner}`, 30);
+      const input = z
+        .object({ force: z.boolean().optional() })
+        .parse(parsedBody);
+      const refresh = await queueMarketRefresh(
+        await portfolioTickers(owner),
+        input.force,
+      );
+      if (refresh.queued.length) waitUntil(runMarketRefresh(refresh.queued));
+      result = refresh;
     } else if (path.startsWith("portfolio/") && method === "DELETE") {
       await run(
         "DELETE FROM portfolio_companies WHERE owner=? AND ticker=?",
@@ -426,26 +467,71 @@ async function handle(request: Request) {
         .max(60)
         .parse(url.searchParams.get("q") ?? "");
       result = await searchCompanies(q, owner);
+    } else if (
+      /^companies\/[^/]+\/refresh-market$/.test(path) &&
+      method === "POST"
+    ) {
+      const ticker = normalizeTicker(path.split("/")[1]);
+      await resolveCompany(ticker);
+      await budget(`company-market:${owner}`, 40);
+      const input = z
+        .object({ force: z.boolean().optional() })
+        .parse(parsedBody);
+      const refresh = await queueMarketRefresh([ticker], input.force);
+      if (refresh.queued.length) waitUntil(runMarketRefresh(refresh.queued));
+      result = refresh;
+    } else if (/^companies\/[^/]+\/snapshot(?:\/advance)?$/.test(path)) {
+      const ticker = normalizeTicker(path.split("/")[1]);
+      await resolveCompany(ticker);
+      if (method === "GET" && !path.endsWith("/advance"))
+        result = await snapshotState(
+          owner,
+          ticker,
+          url.searchParams.get("period") ?? undefined,
+        );
+      else if (method === "POST" && path.endsWith("/advance")) {
+        await budget(`snapshot-advance:${owner}`, 120);
+        const job = await claimSnapshot(owner, ticker);
+        if (job) waitUntil(runSnapshot(job));
+        result = await snapshotState(owner, ticker);
+      } else if (method === "POST") {
+        await budget(`snapshot-start:${owner}`, 40);
+        const input = z
+          .object({ force: z.boolean().optional() })
+          .parse(parsedBody);
+        result = await createSnapshot(owner, ticker, input.force);
+      } else
+        throw new ApiError(
+          405,
+          "method_not_allowed",
+          "Use GET or POST for financial preparation.",
+        );
     } else if (/^companies\/[^/]+\/overview$/.test(path) && method === "GET") {
       const ticker = normalizeTicker(path.split("/")[1]),
         company = await resolveCompany(ticker);
+      const points = await getPoints(ticker, mode);
+      const sync =
+        mode === "live"
+          ? await one<MarketSync>(
+              "SELECT * FROM source_sync WHERE provider='market' AND ticker=?",
+              ticker,
+            )
+          : null;
       result = {
         company,
+        financial_snapshot: await snapshotState(owner, ticker),
         metrics: await all<Metric>(
           "SELECT * FROM financial_metrics WHERE ticker=? AND verification_status<>'unverified'",
           ticker,
         ),
         documents: await all<Omit<Document, "pages">>(
-          "SELECT d.*,j.status financial_extraction_status,j.error financial_extraction_error FROM documents d LEFT JOIN document_jobs j ON j.ticker=d.ticker AND j.url=d.url WHERE d.ticker=?",
+          "SELECT d.*,j.status financial_extraction_status,j.error financial_extraction_error FROM documents d LEFT JOIN document_jobs j ON j.id=(SELECT x.id FROM document_jobs x WHERE x.document_id=d.id OR (x.ticker=d.ticker AND x.url=d.url) ORDER BY x.updated_at DESC LIMIT 1) WHERE d.ticker=?",
           ticker,
         ),
-        points: await getPoints(ticker, mode),
+        points,
         market_freshness:
           mode === "live"
-            ? await one(
-                "SELECT last_attempt,last_success,status,error,details FROM source_sync WHERE provider='market' AND ticker=?",
-                ticker,
-              )
+            ? marketFreshness(points.at(-1)?.date ?? null, sync)
             : null,
         guidance: await guidanceFor(ticker),
         mode,

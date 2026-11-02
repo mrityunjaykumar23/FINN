@@ -1,5 +1,12 @@
 import { percentChange, type Metric } from "./domain.ts";
 export function fiscalPeriod(period: string) {
+  const half = period.match(/^H([12])\s+FY(\d{4})$/);
+  if (half)
+    return {
+      year: Number(half[2]),
+      quarter: null,
+      ordinal: Number(half[2]) * 4 + Number(half[1]) * 2 - 0.25,
+    };
   const m = period.match(/^(?:Q([1-4])\s+)?FY(\d{4})$/);
   return m
     ? {
@@ -27,6 +34,8 @@ export function comparisonPeriods(rows: Metric[], requested?: string) {
     requested ?? available.find((p) => fiscalPeriod(p)!.quarter !== null);
   const p = current ? fiscalPeriod(current) : null;
   if (!p) return [];
+  if (/^H[12]/.test(current!))
+    return [current!, current!.replace(/FY\d{4}$/, `FY${p.year - 1}`)];
   return p.quarter
     ? [
         current!,
@@ -94,6 +103,7 @@ export function selectMetric(
 }
 export function quarterlyComparisons(rows: Metric[], requested?: string) {
   const periods = comparisonPeriods(rows, requested);
+  const isQuarter = !!periods[0]?.startsWith("Q");
   return ["Revenue", "EBITDA", "PBT", "PAT"].map((name) => {
     const current = selectMetric(rows, name, periods[0]);
     const values = periods.map((period, i) =>
@@ -107,11 +117,13 @@ export function quarterlyComparisons(rows: Metric[], requested?: string) {
       name,
       periods,
       values,
-      qoq: compatibleMetrics(values[0], values[1])
-        ? percentChange(values[0]!.value, values[1]!.value).value
-        : null,
-      yoy: compatibleMetrics(values[0], values[2])
-        ? percentChange(values[0]!.value, values[2]!.value).value
+      qoq:
+        isQuarter && compatibleMetrics(values[0], values[1])
+          ? percentChange(values[0]!.value, values[1]!.value).value
+          : null,
+      yoy: compatibleMetrics(values[0], values[isQuarter ? 2 : 1])
+        ? percentChange(values[0]!.value, values[isQuarter ? 2 : 1]!.value)
+            .value
         : null,
     };
   });

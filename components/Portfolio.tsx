@@ -185,6 +185,7 @@ export function Portfolio({
   onAdd,
   onResearch,
   onChange,
+  onRefreshMarket,
   notify,
 }: {
   companies: Company[];
@@ -193,6 +194,7 @@ export function Portfolio({
   onAdd: () => void;
   onResearch: (t: string) => void;
   onChange: () => void;
+  onRefreshMarket: () => void;
   notify: (m: string) => void;
 }) {
   const [query, setQuery] = useState(""),
@@ -215,6 +217,26 @@ export function Portfolio({
   const filtered = companies.filter((c) =>
     (c.name + c.ticker + c.sector).toLowerCase().includes(query.toLowerCase()),
   );
+  const latest = companies
+    .map((c) => c.date)
+    .filter((d): d is string => !!d)
+    .sort()
+    .at(-1);
+  async function retryMarket(ticker: string) {
+    setBusy(ticker);
+    setError("");
+    try {
+      await api(`companies/${encodeURIComponent(ticker)}/refresh-market`, {
+        method: "POST",
+        body: JSON.stringify({ force: true }),
+      });
+      onChange();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy("");
+    }
+  }
   return (
     <>
       <div className="page-heading compact">
@@ -226,6 +248,12 @@ export function Portfolio({
             freshness.
           </p>
         </div>
+        {mode === "live" && (
+          <button className="secondary-button" onClick={onRefreshMarket}>
+            <RefreshCw size={15} />
+            Refresh market data
+          </button>
+        )}
         <button className="primary-button" onClick={onAdd}>
           <Plus size={17} /> Add company
         </button>
@@ -254,7 +282,13 @@ export function Portfolio({
           <span>advancers / decliners</span>
         </div>
         <div>
-          <strong>{mode === "historical" ? "22 Apr ’25" : "EOD"}</strong>
+          <strong>
+            {mode === "historical"
+              ? "22 Apr ’25"
+              : latest
+                ? date(latest)
+                : "Unavailable"}
+          </strong>
           <span>
             {mode === "historical"
               ? "historical observation date"
@@ -312,22 +346,68 @@ export function Portfolio({
                   {c.close === null ? "Unavailable" : `₹${num(c.close)}`}
                 </strong>
                 <span
-                  title={`Data retrieved ${c.updated_at ?? "not recorded"}`}
+                  title={`Market check ${c.market_freshness?.last_success ?? (mode === "historical" ? c.updated_at : "not recorded") ?? "not recorded"}`}
                 >
-                  {c.date ? date(c.date) : "Fetch in live research"}
+                  {c.date
+                    ? date(c.date)
+                    : mode === "historical"
+                      ? "No replay observation"
+                      : "No verified daily close"}
                 </span>
+                {mode === "live" && (
+                  <span
+                    className="market-row-state"
+                    title={c.market_freshness?.error ?? undefined}
+                  >
+                    {c.market_freshness?.refreshing
+                      ? "Checking latest session…"
+                      : c.market_freshness?.error
+                        ? "Source retrieval failed"
+                        : c.market_freshness?.stale
+                          ? "Last observation is stale"
+                          : "Verified completed session"}
+                  </span>
+                )}
+                {mode === "live" &&
+                  (c.market_freshness?.stale || c.market_freshness?.error) &&
+                  !c.market_freshness?.refreshing && (
+                    <button
+                      className="market-row-retry"
+                      disabled={busy === c.ticker}
+                      onClick={() => void retryMarket(c.ticker)}
+                      title={
+                        c.market_freshness?.error ??
+                        "Fetch latest completed sessions"
+                      }
+                      aria-label={`Retry market data ${c.ticker}`}
+                    >
+                      Retry market data
+                    </button>
+                  )}
               </div>
               <span
                 className={`holding-change mono ${c.change == null ? "muted" : c.change < 0 ? "negative" : "positive"}`}
               >
                 {pct(c.change)}
+                {c.change == null && mode === "live" && c.date && (
+                  <small className="market-explanation">
+                    Comparable adjusted closes needed
+                  </small>
+                )}
               </span>
               <span
                 className={`holding-volume mono ${(c.relative_volume ?? 0) >= 2 ? "amber-text" : ""}`}
               >
-                {c.relative_volume == null
-                  ? "—"
-                  : `${c.relative_volume.toFixed(2)}×`}
+                {c.relative_volume == null ? (
+                  <small
+                    className="market-explanation"
+                    title={`${c.prior_sessions ?? 0} prior sessions; a complete prior-session baseline is required.`}
+                  >
+                    Insufficient history
+                  </small>
+                ) : (
+                  `${c.relative_volume.toFixed(2)}×`
+                )}
               </span>
               <button
                 className="holding-events"

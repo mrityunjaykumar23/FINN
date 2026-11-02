@@ -1,0 +1,23 @@
+{"passed":true,"latest":"2026-11-02","close":1420.699951171875,"sessions":1,"change":null,"relative_volume":null,"history_limitation":"Provider supplied fewer than two verified daily observations; change is unavailable."}
+{"ticker":"JPL.NS","market":{"date":"2026-11-02","close":1420.699951171875,"change":null,"relative_volume":null,"sessions":1,"latest_adjusted_close":1420.699951171875}}
+{"ticker":"JPL.NS","phase":"discovery","status":"queued","elapsed_ms":38,"detail":null}
+{"ticker":"JPL.NS","phase":"discovery","status":"running","elapsed_ms":1301,"detail":null}
+{"ticker":"JPL.NS","phase":"indexing","status":"queued","elapsed_ms":2344,"detail":"Indexing the original financial results. Prior verified metrics remain visible."}
+{"ticker":"JPL.NS","phase":"next_source","status":"queued","elapsed_ms":3421,"detail":"Original pages indexed. Validating accounting scope, reporting columns and financial figures."}
+{"ticker":"JPL.NS","phase":"indexing","status":"queued","elapsed_ms":4503,"detail":"Checking the original presentation for additional explicitly disclosed metrics."}
+{"ticker":"JPL.NS","phase":"next_source","status":"queued","elapsed_ms":5571,"detail":"Original pages indexed. Validating accounting scope, reporting columns and financial figures."}
+{"ticker":"JPL.NS","status":"complete","period":"Q2 FY2027","metrics":[{"name":"Revenue","state":"Verified value","value":40475},{"name":"EBITDA","state":"Verified value","value":21879},{"name":"PBT","state":"Verified value","value":11259},{"name":"PAT","state":"Verified value","value":8387}],"errors":[]}
+{"ticker":"INFY.NS","market":{"date":"2026-10-30","close":1185,"change":3.358046227649367,"relative_volume":0.7731779464001971,"sessions":62,"latest_adjusted_close":1185}}
+{"ticker":"INFY.NS","phase":"discovery","status":"queued","elapsed_ms":34,"detail":null}
+{"ticker":"INFY.NS","phase":"indexing","status":"queued","elapsed_ms":1122,"detail":"Indexing the original financial results. Prior verified metrics remain visible."}
+{"ticker":"INFY.NS","phase":"next_source","status":"queued","elapsed_ms":2193,"detail":"Original pages indexed. Validating accounting scope, reporting columns and financial figures."}
+{"ticker":"INFY.NS","status":"complete","period":"Q2 FY2027","metrics":[{"name":"Revenue","state":"Verified value","value":49244},{"name":"EBITDA","state":"Insufficient source evidence"},{"name":"PBT","state":"Verified value","value":11063},{"name":"PAT","state":"Verified value","value":7838}],"errors":[]}
+{"ticker":"DABUR.NS","market":{"date":"2026-10-30","close":365.6000061035156,"change":-1.1891875395903715,"relative_volume":0.9320627215538948,"sessions":62,"latest_adjusted_close":365.6000061035156}}
+{"ticker":"DABUR.NS","phase":"discovery","status":"queued","elapsed_ms":23,"detail":null}
+{"ticker":"DABUR.NS","phase":"indexing","status":"queued","elapsed_ms":1070,"detail":"Indexing the original financial results. Prior verified metrics remain visible."}
+{"ticker":"DABUR.NS","phase":"indexing","status":"running","elapsed_ms":2176,"detail":"Indexing the original financial results. Prior verified metrics remain visible."}
+{"ticker":"DABUR.NS","phase":"extracting","status":"queued","elapsed_ms":4243,"detail":"Original pages indexed. Validating accounting scope, reporting columns and financial figures."}
+{"ticker":"DABUR.NS","phase":"extracting","status":"running","elapsed_ms":5383,"detail":"Original pages indexed. Validating accounting scope, reporting columns and financial figures."}
+{"ticker":"DABUR.NS","phase":"next_source","status":"queued","elapsed_ms":9465,"detail":"Source-backed financial figures accepted."}
+{"ticker":"DABUR.NS","status":"complete","period":"Q1 FY2027","metrics":[{"name":"Revenue","state":"Verified value","value":3764.39},{"name":"EBITDA","state":"Not disclosed in the verified source"},{"name":"PBT","state":"Verified value","value":755.65},{"name":"PAT","state":"Verified value","value":586.16}],"errors":[]}
+{"passed":true,"companies":["JPL.NS","INFY.NS","DABUR.NS"]}

@@ -21,7 +21,7 @@ export type Category = (typeof categories)[number];
 export type Point = {
   date: string;
   close: number;
-  adjusted_close: number;
+  adjusted_close: number | null;
   volume: number;
 };
 export type Settings = {

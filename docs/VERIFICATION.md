@@ -1,3 +1,9 @@
+# Latest data verification — 3 November 2026
+
+See [LATEST_DATA_VERIFICATION.md](LATEST_DATA_VERIFICATION.md) for the current Latest-mode, automatic financial-snapshot and three-company acceptance results: 117 automated tests passed, with no failures or skips, plus financial validation, migration and browser checks. Local review: http://127.0.0.1:5173/. No deployment or push was performed.
+
+Earlier reports follow as historical records.
+
 # Final corrections verification — 2 November 2026
 
 See [FINAL_CORRECTIONS_REPORT.md](FINAL_CORRECTIONS_REPORT.md) for the current implementation, 94 passing automated tests, actual external-source checks, Gemini execution, migration/recovery/restart evidence and remaining limitations. The original design and 18-company starter portfolio are retained; current work remains local and unpublished.

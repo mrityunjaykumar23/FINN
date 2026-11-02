@@ -534,7 +534,21 @@ export function Briefing({
                 ? "Historical closes"
                 : "Completed EOD closes"}{" "}
               ·{" "}
-              {mode === "historical" ? "22 Apr 2025" : "latest stored session"}
+              {mode === "historical"
+                ? "22 Apr 2025"
+                : companies
+                      .map((c) => c.date)
+                      .filter((d): d is string => !!d)
+                      .sort()
+                      .at(-1)
+                  ? date(
+                      companies
+                        .map((c) => c.date)
+                        .filter((d): d is string => !!d)
+                        .sort()
+                        .at(-1)!,
+                    )
+                  : "No verified session"}
               <br />
               Percentage moves use adjusted prices.
             </p>

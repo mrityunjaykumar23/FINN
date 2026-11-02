@@ -71,6 +71,20 @@
       "when": 1793640127890,
       "tag": "0009_brave_the_stranger",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1793652213315,
+      "tag": "0010_giant_cyclops",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1793655025885,
+      "tag": "0011_third_deathstrike",
+      "breakpoints": true
     }
   ]
 }

@@ -114,6 +114,22 @@ export const prices = sqliteTable(
     index("prices_ticker_mode_date").on(t.ticker, t.mode, t.date),
   ],
 );
+// Raw daily prices are retained independently when the provider has not published an adjusted close.
+export const unadjustedPrices = sqliteTable(
+  "unadjusted_daily_prices",
+  {
+    ticker: text("ticker")
+      .notNull()
+      .references(() => companies.ticker, { onDelete: "restrict" }),
+    date: text("date").notNull(),
+    close: real("close").notNull(),
+    volume: real("volume").notNull(),
+    source: text("source").notNull(),
+    retrieved_at: text("retrieved_at").notNull(),
+    mode: text("mode").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.ticker, t.date, t.mode] })],
+);
 export const announcements = sqliteTable(
   "announcements",
   {
@@ -560,6 +576,7 @@ export const researchJobs = sqliteTable(
       .notNull()
       .references(() => companies.ticker),
     question: text("question").notNull(),
+    purpose: text("purpose").notNull().default("research"),
     filters: text("filters").notNull(),
     status: text("status").notNull(),
     phase: text("phase").notNull(),
@@ -577,6 +594,18 @@ export const meta = sqliteTable("meta", {
   key: text("key").notNull().primaryKey(),
   value: text("value").notNull(),
 });
+export const documentLayouts = sqliteTable(
+  "document_layouts",
+  {
+    document_id: text("document_id")
+      .notNull()
+      .references(() => documents.id),
+    page: integer("page").notNull(),
+    payload: text("payload").notNull(),
+    version: text("version").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.document_id, t.page] })],
+);
 export const metricDerivations = sqliteTable(
   "metric_derivations",
   {

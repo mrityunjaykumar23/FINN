@@ -1,13 +1,17 @@
+import financialSources from "../data/financial-sources.json";
+import {
+  PDF_LAYOUT_VERSION,
+  captureFinancialLayouts,
+  extractPdfFinancials,
+} from "./pdf-financials";
 import { extractionOutcome, publicationMetadata } from "./pipeline-state";
 import { financialLabelSupported, revenueContext } from "./financial-labels";
 import { automatedEventSupported } from "./event-evidence";
 import { contiguousEvidence } from "./event-analysis";
+import { verifiedYahooDaily, type YahooResult } from "./yahoo-data";
 import { canonicalResearchFilters } from "./research-filters";
-import {
-  completedSessions,
-  exchangeDate,
-  type MarketMeta,
-} from "./market-sessions";
+import { marketFreshness, type MarketSync } from "./market-state";
+import { exchangeDate } from "./market-sessions";
 import { briefingPlan, monitoringCoverage } from "./briefing-query";
 import { env } from "cloudflare:workers";
 import seedData from "../data/seed.json";
@@ -561,11 +565,16 @@ export async function getSettings(owner: string): Promise<Settings> {
   );
   return row ? JSON.parse(row.settings) : structuredClone(defaultSettings);
 }
+// Raw-only observations remain distinct; a verified adjusted bar supersedes the same raw session.
+const observedPricesByMode = `(SELECT ticker,date,close,adjusted_close,volume,mode FROM daily_prices UNION ALL SELECT r.ticker,r.date,r.close,NULL AS adjusted_close,r.volume,r.mode FROM unadjusted_daily_prices r WHERE NOT EXISTS (SELECT 1 FROM daily_prices a WHERE a.ticker=r.ticker AND a.date=r.date AND a.mode=r.mode))`;
 export async function getPoints(ticker: string, mode = "historical") {
   return all<Point>(
-    "SELECT date,close,adjusted_close,volume FROM daily_prices WHERE ticker=? AND mode=? ORDER BY date",
+    "SELECT date,close,adjusted_close,volume FROM " +
+      observedPricesByMode +
+      " WHERE ticker=? AND mode=? AND date>=coalesce((SELECT json_extract(value,'$.date') FROM meta WHERE key='listing:'||?), '0000') ORDER BY date",
     ticker,
     mode,
+    ticker,
   );
 }
 export async function portfolioFor(owner: string, mode = "historical") {
@@ -576,7 +585,9 @@ export async function portfolioFor(owner: string, mode = "historical") {
     ),
     getSettings(owner),
     all<Point & { ticker: string }>(
-      "SELECT d.ticker,d.date,d.close,d.adjusted_close,d.volume FROM daily_prices d JOIN portfolio_companies p ON p.ticker=d.ticker WHERE p.owner=? AND d.mode=? ORDER BY d.date",
+      "SELECT d.ticker,d.date,d.close,d.adjusted_close,d.volume FROM " +
+        observedPricesByMode +
+        " d JOIN portfolio_companies p ON p.ticker=d.ticker WHERE p.owner=? AND d.mode=? AND d.date>=coalesce((SELECT json_extract(value,'$.date') FROM meta WHERE key='listing:'||d.ticker),'0000') ORDER BY d.date",
       owner,
       mode,
     ),
@@ -586,6 +597,12 @@ export async function portfolioFor(owner: string, mode = "historical") {
       mode,
     ),
   ]);
+  const marketSync =
+    mode === "live"
+      ? await all<MarketSync & { ticker: string }>(
+          "SELECT * FROM source_sync WHERE provider='market'",
+        )
+      : [];
   return companies.map((c) => ({
     ...c,
     ...marketSummary(
@@ -593,6 +610,23 @@ export async function portfolioFor(owner: string, mode = "historical") {
       settings.volume_lookback,
     ),
     events: counts.find((x) => x.ticker === c.ticker)?.n ?? 0,
+    prior_sessions: Math.max(
+      0,
+      points.filter((p) => p.ticker === c.ticker).length - 1,
+    ),
+    relative_volume_status:
+      points.filter((p) => p.ticker === c.ticker).length <=
+      settings.volume_lookback
+        ? "Insufficient prior sessions"
+        : "Available",
+    ...(mode === "live"
+      ? {
+          market_freshness: marketFreshness(
+            points.filter((p) => p.ticker === c.ticker).at(-1)?.date ?? null,
+            marketSync.find((s) => s.ticker === c.ticker),
+          ),
+        }
+      : {}),
   }));
 }
 export async function getFilings(
@@ -1229,61 +1263,88 @@ export async function resolveCompany(raw: string) {
   return company;
 }
 export async function yahooMarket(ticker: string) {
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=3mo&interval=1d`;
-  const r = await fetch(url, {
-    signal: AbortSignal.timeout(16000),
-    headers: { "User-Agent": "FINN/1.0 financial research prototype" },
-  });
-  if (!r.ok)
-    throw new ApiError(
-      r.status === 429 ? 429 : 503,
-      "market_source_unavailable",
-      `The market-data provider returned ${r.status}. No synthetic data was substituted.`,
-    );
-  const data = (await r.json()) as {
-    chart: {
-      result:
-        | {
-            timestamp: number[];
-            meta: MarketMeta;
-            indicators: {
-              quote: {
-                open: number[];
-                high: number[];
-                low: number[];
-                close: number[];
-                volume: number[];
-              }[];
-              adjclose?: { adjclose: number[] }[];
-            };
-          }[]
-        | null;
-    };
+  const origin = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}`;
+  const url = `${origin}?range=3mo&interval=1d&includeAdjustedClose=true`;
+  const deadline = AbortSignal.timeout(20000);
+  const load = async (source: string) => {
+    const r = await fetch(source, {
+      signal: deadline,
+      headers: { "User-Agent": "FINN/1.0 financial research prototype" },
+    });
+    if (!r.ok)
+      throw new ApiError(
+        r.status === 429 ? 429 : 503,
+        "market_source_unavailable",
+        `The market-data provider returned ${r.status}. Last verified observations are retained.`,
+      );
+    const d = (await r.json()) as { chart: { result: YahooResult[] | null } };
+    if (!d.chart.result?.[0]?.timestamp)
+      throw new ApiError(
+        422,
+        "unsupported_ticker",
+        "Ticker not found by the market provider.",
+      );
+    return d.chart.result[0];
   };
-  const value = data.chart.result?.[0];
-  if (!value?.timestamp)
+  const value = await load(url);
+  let accepted: ReturnType<typeof verifiedYahooDaily>;
+  try {
+    accepted = verifiedYahooDaily(value, ticker);
+  } catch (e) {
     throw new ApiError(
-      422,
-      "unsupported_ticker",
-      "Ticker not found by the market provider.",
+      503,
+      "market_data_unverified",
+      e instanceof Error ? e.message : "Daily data could not be verified.",
     );
-  const quote = value.indicators.quote[0],
-    adjusted = value.indicators.adjclose?.[0]?.adjclose ?? quote.close;
-  const observations = value.timestamp.map((t, i) => ({
-    timestamp: t,
-    date: exchangeDate(t * 1000),
-    open: quote.open?.[i],
-    high: quote.high?.[i],
-    low: quote.low?.[i],
-    close: quote.close[i],
-    adjusted_close: adjusted[i],
-    volume: quote.volume[i],
-  }));
-  const { points, freshness } = completedSessions(observations, value.meta);
+  }
+  const point_sources: Record<string, string> = Object.fromEntries(
+    accepted.points.map((p) => [p.date, url]),
+  );
+  let history_error: string | null = null;
+  // Newly listed symbols may return only the latest daily bar. One bounded previous-session
+  // request can recover history, but intraday/default-range responses are never accepted.
+  if (
+    accepted.points.length === 1 &&
+    value.meta.firstTradeDate &&
+    Date.now() - value.meta.firstTradeDate * 1000 < 90 * 86400000
+  ) {
+    const end = Math.floor(
+      +new Date(accepted.points[0].date + "T00:00:00+05:30") / 1000,
+    );
+    if (end > value.meta.firstTradeDate) {
+      const previous = `${origin}?period1=${value.meta.firstTradeDate}&period2=${end}&interval=1d&includeAdjustedClose=true`;
+      try {
+        const history = verifiedYahooDaily(await load(previous), ticker);
+        const rows = new Map(accepted.points.map((p) => [p.date, p]));
+        for (const p of history.points.filter(
+          (p) => p.date < accepted.points[0].date,
+        )) {
+          rows.set(p.date, p);
+          point_sources[p.date] = previous;
+        }
+        accepted = {
+          ...accepted,
+          points: [...rows.values()].sort((a, b) =>
+            a.date.localeCompare(b.date),
+          ),
+        };
+      } catch (e) {
+        history_error =
+          e instanceof Error ? e.message : "Previous sessions unavailable.";
+      }
+    }
+  }
+  if (!accepted.points.length)
+    throw new ApiError(
+      503,
+      "no_completed_sessions",
+      "No valid completed daily bars are available. Stored observations are retained.",
+    );
   return {
     name: value.meta.longName ?? value.meta.symbol ?? ticker,
-    points,
-    freshness,
+    points: accepted.points,
+    freshness: { ...accepted.freshness, history_error },
+    point_sources,
     source: url,
     retrieved_at: new Date().toISOString(),
   };
@@ -1292,15 +1353,7 @@ export async function storeMarket(
   ticker: string,
   result: Awaited<ReturnType<typeof yahooMarket>>,
 ) {
-  const old = new Set(
-    (
-      await all<{ date: string }>(
-        "SELECT date FROM daily_prices WHERE ticker=? AND mode=?",
-        ticker,
-        "live",
-      )
-    ).map((p) => p.date),
-  );
+  const old = new Set((await getPoints(ticker, "live")).map((p) => p.date));
   const statements = insertMany(
     "daily_prices",
     [
@@ -1313,26 +1366,61 @@ export async function storeMarket(
       "retrieved_at",
       "mode",
     ],
-    result.points.map((p) => [
-      ticker,
-      p.date,
-      p.close,
-      p.adjusted_close,
-      p.volume,
-      result.source,
-      result.retrieved_at,
-      "live",
-    ]),
+    result.points
+      .filter((p) => p.adjusted_close !== null)
+      .map((p) => [
+        ticker,
+        p.date,
+        p.close,
+        p.adjusted_close,
+        p.volume,
+        result.point_sources?.[p.date] ?? result.source,
+        result.retrieved_at,
+        "live",
+      ]),
     true,
+  );
+  statements.push(
+    ...insertMany(
+      "unadjusted_daily_prices",
+      ["ticker", "date", "close", "volume", "source", "retrieved_at", "mode"],
+      result.points
+        .filter((p) => p.adjusted_close === null)
+        .map((p) => [
+          ticker,
+          p.date,
+          p.close,
+          p.volume,
+          result.point_sources?.[p.date] ?? result.source,
+          result.retrieved_at,
+          "live",
+        ]),
+      true,
+    ),
   );
   statements.push(
     db()
       .prepare(
-        "INSERT INTO source_sync(provider,ticker,last_success,last_attempt,status) VALUES ('market',?,?,?,'success') ON CONFLICT(provider,ticker) DO UPDATE SET last_success=excluded.last_success,last_attempt=excluded.last_attempt,status='success',error=NULL",
+        "INSERT INTO source_sync(provider,ticker,last_success,last_attempt,status,details) VALUES ('market',?,?,?,'success',?) ON CONFLICT(provider,ticker) DO UPDATE SET last_success=excluded.last_success,last_attempt=excluded.last_attempt,status='success',error=NULL,details=excluded.details",
       )
-      .bind(ticker, result.retrieved_at, result.retrieved_at),
+      .bind(
+        ticker,
+        result.retrieved_at,
+        result.retrieved_at,
+        JSON.stringify(result.freshness),
+      ),
   );
   await db().batch(statements);
+  if (result.freshness.listing_date)
+    await run(
+      "INSERT INTO meta(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+      `listing:${ticker}`,
+      JSON.stringify({
+        date: result.freshness.listing_date,
+        source: result.source,
+        method: "Yahoo firstTradeDate for confirmed ticker",
+      }),
+    );
   return {
     inserted: result.points.filter((p) => !old.has(p.date)).length,
     duplicates: result.points.filter((p) => old.has(p.date)).length,
@@ -1712,7 +1800,16 @@ export async function ingestPdf(
     hash,
     ticker,
   );
-  if (existing) return existing.id;
+  if (
+    existing &&
+    (
+      await one<{ value: string }>(
+        "SELECT value FROM meta WHERE key=?",
+        `layout-checked:${existing.id}`,
+      )
+    )?.value === PDF_LAYOUT_VERSION
+  )
+    return existing.id;
   if (
     await one(
       "SELECT id FROM documents WHERE hash=? AND ticker<>?",
@@ -1735,8 +1832,9 @@ export async function ingestPdf(
     throw new Error("Document exceeds the 500-page limit");
   }
   const result = await extractText(pdf, { mergePages: false });
-  await pdf.loadingTask.destroy();
   const pages = result.text as string[];
+  const layouts = await captureFinancialLayouts(pdf, pages);
+  await pdf.loadingTask.destroy();
   const company = await one<{ name: string }>(
     "SELECT name FROM companies WHERE ticker=?",
     ticker,
@@ -1772,7 +1870,7 @@ export async function ingestPdf(
   const fiscalPeriod = header
     ? `Q${header[1]} FY${Number(header[2]) < 100 ? 2000 + Number(header[2]) : header[2]}`
     : "Period not verified";
-  const id = `live-${hash.slice(0, 20)}`,
+  const id = existing?.id ?? `live-${hash.slice(0, 20)}`,
     type = documentType(title + " " + url);
   const documentInsert = db()
     .prepare(
@@ -1809,7 +1907,49 @@ export async function ingestPdf(
     rows,
   );
   await db().batch([documentInsert, ...statements]);
-  if (header)
+  for (const layout of layouts)
+    await run(
+      "INSERT OR REPLACE INTO document_layouts(document_id,page,payload,version) VALUES (?,?,?,?)",
+      id,
+      layout.page,
+      JSON.stringify(layout),
+      PDF_LAYOUT_VERSION,
+    );
+  await run(
+    "INSERT OR REPLACE INTO meta(key,value) VALUES (?,?)",
+    `layout-checked:${id}`,
+    PDF_LAYOUT_VERSION,
+  );
+  const registered = financialSources.find((c) => c.ticker === ticker);
+  const verified = registered && {
+    ...registered,
+    currency:
+      registered.currencyDocumentHash === hash
+        ? registered.currency
+        : undefined,
+  };
+  const parsed = extractPdfFinancials(
+    layouts,
+    { ticker, name: company?.name ?? ticker },
+    verified,
+  );
+  if (parsed.calendar)
+    await run(
+      "INSERT OR REPLACE INTO meta(key,value) VALUES (?,?)",
+      `fiscal-calendar:${ticker}`,
+      JSON.stringify({ ...parsed.calendar, source: url, document_id: id }),
+    );
+  const tablePeriod = sortPeriods([
+    ...parsed.metrics.map((m) => m.period),
+    ...parsed.periods,
+  ]).find((p) => p.startsWith("Q"));
+  if (tablePeriod)
+    await run(
+      "UPDATE documents SET period=?,period_status='source_table_header' WHERE id=?",
+      tablePeriod,
+      id,
+    );
+  if (header && !tablePeriod)
     await run(
       "UPDATE documents SET period=?,period_status='source_header' WHERE id=?",
       fiscalPeriod,

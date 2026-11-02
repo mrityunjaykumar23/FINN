@@ -55,15 +55,17 @@ export function completedSessions(
   meta: MarketMeta,
   now = new Date(),
   bufferMinutes = 20,
+  allowUnadjusted = false,
 ) {
   const today = exchangeDate(now),
     calendarKnown = today.startsWith("2026-");
   const valid = (p: DailyObservation) =>
-    [p.open, p.high, p.low, p.close, p.adjusted_close, p.volume].every(
-      Number.isFinite,
-    ) &&
+    [p.open, p.high, p.low, p.close, p.volume].every(Number.isFinite) &&
     p.close > 0 &&
-    p.adjusted_close > 0 &&
+    ((allowUnadjusted && p.adjusted_close === null) ||
+      (p.adjusted_close !== null &&
+        Number.isFinite(p.adjusted_close) &&
+        p.adjusted_close > 0)) &&
     p.high >= Math.max(p.open, p.close, p.low) &&
     p.low <= Math.min(p.open, p.close) &&
     p.volume >= 0;

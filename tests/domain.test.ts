@@ -237,7 +237,11 @@ test("daily source observations are unique and contain no synthetic ticker rows"
     );
     assert.ok(
       value.points.every(
-        (p) => p.close > 0 && p.adjusted_close > 0 && p.volume >= 0,
+        (p) =>
+          p.close > 0 &&
+          p.adjusted_close !== null &&
+          p.adjusted_close > 0 &&
+          p.volume >= 0,
       ),
     );
   }

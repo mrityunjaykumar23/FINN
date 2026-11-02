@@ -49,11 +49,10 @@ import {
   TickerIcon,
 } from "./common";
 
-import { sortPeriods } from "@/lib/periods";
 import { SystemStatus } from "./SystemStatus";
 import { ResearchAnswer } from "./ResearchReport";
 import { FinnAvatar } from "./Brand";
-import { financialNumber } from "@/lib/presentation";
+import { FinancialSnapshot } from "./FinancialSnapshot";
 type ResearchJobState = {
   id: string;
   ticker: string;
@@ -88,6 +87,7 @@ type Overview = {
     last_attempt: string | null;
     details: string;
     error?: string;
+    refreshing?: boolean;
   };
   company: Company;
   metrics: Metric[];
@@ -95,7 +95,7 @@ type Overview = {
   points: {
     date: string;
     close: number;
-    adjusted_close: number;
+    adjusted_close: number | null;
     volume: number;
   }[];
   guidance: GuidanceResult[];
@@ -129,8 +129,7 @@ export function ResearchView({
     [busy, setBusy] = useState(false),
     [type, setType] = useState(""),
     [period, setPeriod] = useState(""),
-    [chartType, setChartType] = useState("price"),
-    [metricPeriod, setMetricPeriod] = useState("");
+    [chartType, setChartType] = useState("price");
   const answerRef = useRef<HTMLDivElement>(null);
   const activeRequest = useRef<AbortController | null>(null);
   const [job, setJob] = useState<ResearchJobState | null>(null);
@@ -192,15 +191,6 @@ export function ResearchView({
           { signal: controller.signal },
         );
         setOverview(updated);
-        setMetricPeriod((current) =>
-          updated.metrics.some((m) => m.period === current)
-            ? current
-            : (sortPeriods(updated.metrics.map((m) => m.period)).find((p) =>
-                p.startsWith("Q"),
-              ) ??
-              sortPeriods(updated.metrics.map((m) => m.period))[0] ??
-              ""),
-        );
       } catch (e) {
         if (!controller.signal.aborted) setError((e as Error).message);
       } finally {
@@ -232,13 +222,6 @@ export function ResearchView({
       .then((d) => {
         if (active) {
           setOverview(d);
-          setMetricPeriod(
-            sortPeriods(d.metrics.map((m) => m.period)).find((p) =>
-              p.startsWith("Q"),
-            ) ??
-              sortPeriods(d.metrics.map((m) => m.period))[0] ??
-              "",
-          );
           if (initialQuestion) void ask(initialQuestion);
         }
       })
@@ -252,6 +235,50 @@ export function ResearchView({
       active = false;
     };
   }, [ticker, mode, initialQuestion, ask]);
+  useEffect(() => {
+    if (mode !== "live") return;
+    const controller = new AbortController(),
+      signal = controller.signal;
+    void (async () => {
+      await api(`companies/${encodeURIComponent(ticker)}/refresh-market`, {
+        method: "POST",
+        body: "{}",
+        signal,
+      });
+      for (let i = 0; i < 15; i++) {
+        const updated = await api<Overview>(
+          `companies/${encodeURIComponent(ticker)}/overview?mode=live`,
+          { signal },
+        );
+        setOverview(updated);
+        if (!updated.market_freshness?.refreshing) break;
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(() => {
+            signal.removeEventListener("abort", cancel);
+            resolve();
+          }, 1500);
+          const cancel = () => {
+            clearTimeout(timer);
+            reject(new DOMException("Aborted", "AbortError"));
+          };
+          signal.addEventListener("abort", cancel, { once: true });
+        });
+      }
+    })().catch(() => {
+      /* Existing market freshness/error and retry button remain available. */
+    });
+    return () => controller.abort();
+  }, [ticker, mode]);
+  const financialPrepared = useCallback(
+    async (signal: AbortSignal) => {
+      const updated = await api<Overview>(
+        `companies/${encodeURIComponent(ticker)}/overview?mode=${mode}`,
+        { signal },
+      );
+      if (!signal.aborted) setOverview(updated);
+    },
+    [ticker, mode],
+  );
   async function add() {
     setBusy(true);
     try {
@@ -323,8 +350,6 @@ export function ResearchView({
     "What were the major risks mentioned in the annual report?",
     "Explain profitability trends using comparable quarters.",
   ];
-  const activeMetrics =
-    overview?.metrics.filter((m) => m.period === metricPeriod) ?? [];
   return (
     <>
       <div className="page-heading compact">
@@ -613,12 +638,22 @@ export function ResearchView({
                               labelFormatter={(label) => date(String(label))}
                               formatter={(value) => [
                                 `₹${num(Number(value))}`,
-                                "Adjusted close",
+                                overview.points.some(
+                                  (p) => p.adjusted_close === null,
+                                )
+                                  ? "Daily close (unadjusted)"
+                                  : "Adjusted close",
                               ]}
                             />
                             <Area
                               type="linear"
-                              dataKey="adjusted_close"
+                              dataKey={
+                                overview.points.some(
+                                  (p) => p.adjusted_close === null,
+                                )
+                                  ? "close"
+                                  : "adjusted_close"
+                              }
                               stroke="var(--finn-accent)"
                               strokeWidth={2}
                               fill="var(--finn-accent)"
@@ -689,6 +724,13 @@ export function ResearchView({
                       live mode. No chart points are manufactured.
                     </Empty>
                   )}
+                  {overview.points.some((p) => p.adjusted_close === null) && (
+                    <p className="muted">
+                      Chart shows unadjusted daily closes. Percentage moves
+                      remain unavailable when comparable adjusted closes are
+                      missing.
+                    </p>
+                  )}
                   {mode === "live" && (
                     <p className="muted">
                       Latest stored session:{" "}
@@ -701,71 +743,29 @@ export function ResearchView({
                         : "never"}{" "}
                       · Source status:{" "}
                       {overview.market_freshness?.status ?? "not checked"}
+                      {overview.market_freshness?.error && (
+                        <span className="market-error">
+                          {" "}
+                          · {overview.market_freshness.error} Use the market
+                          refresh button to retry.
+                        </span>
+                      )}
                     </p>
                   )}
                   <p className="table-note">
-                    Prices in ₹. The price series uses adjusted closes
-                    consistently; it may differ from the daily close in your
-                    watchlist.
+                    Prices in ₹. Daily change uses comparable adjusted closes.
+                    Chart labels identify the plotted series.
                   </p>
                 </section>
               </div>
               <aside className="research-rail">
-                <section className="snapshot-panel">
-                  <div className="section-heading">
-                    <h3>Financial snapshot</h3>
-                    <FileText size={15} />
-                  </div>
-                  <label>
-                    <span className="sr-only">Financial snapshot period</span>
-                    <select
-                      value={metricPeriod}
-                      onChange={(e) => setMetricPeriod(e.target.value)}
-                    >
-                      {sortPeriods(overview.metrics.map((m) => m.period)).map(
-                        (p) => (
-                          <option key={p}>{p}</option>
-                        ),
-                      )}
-                    </select>
-                  </label>
-                  {["Revenue", "EBITDA", "PBT", "PAT"].map((name) => {
-                    const m = [...activeMetrics]
-                      .sort(
-                        (a, b) =>
-                          Number(/consolidated/i.test(b.basis)) * 2 +
-                          Number(b.unit === "INR crore") -
-                          (Number(/consolidated/i.test(a.basis)) * 2 +
-                            Number(a.unit === "INR crore")),
-                      )
-                      .find((m) => m.name === name);
-                    const doc = overview.documents.find(
-                      (d) => d.id === m?.document_id,
-                    );
-                    return (
-                      <div className="snapshot-metric" key={name}>
-                        <span>{name}</span>
-                        <strong>
-                          {m?.value == null ? (
-                            <small>Not reported</small>
-                          ) : (
-                            `${m.unit.startsWith("INR") ? "₹" : m.unit.startsWith("USD") ? "$" : ""}${financialNumber(m.value)}`
-                          )}
-                        </strong>
-                        {m && doc && (
-                          <SourceLink url={doc.url} page={m.page}>
-                            PDF p.{m.page} · {m.unit} · {m.basis}
-                          </SourceLink>
-                        )}
-                      </div>
-                    );
-                  })}
-                  <p>
-                    {activeMetrics.length
-                      ? "Each value retains its reported unit and accounting basis."
-                      : "No validated extraction for this period"}
-                  </p>
-                </section>
+                <FinancialSnapshot
+                  key={ticker}
+                  ticker={ticker}
+                  metrics={overview.metrics}
+                  documents={overview.documents}
+                  onPrepared={financialPrepared}
+                />
                 {!!overview.guidance.length && (
                   <div className="research-guidance">
                     <Target size={20} />

@@ -1,3 +1,9 @@
+import {
+  PDF_LAYOUT_VERSION,
+  extractPdfFinancials,
+  type PdfLayout,
+} from "../pdf-financials";
+import financialSources from "../../data/financial-sources.json";
 import { env } from "cloudflare:workers";
 import {
   all,
@@ -161,7 +167,11 @@ export async function synthesizeResearch(
     model_used: modelForTask(config(), "research", question)!,
   };
 }
-export async function extractDocument(ticker: string, documentId: string) {
+export async function extractDocument(
+  ticker: string,
+  documentId: string,
+  options: { preferDeterministic?: boolean; deterministicOnly?: boolean } = {},
+) {
   const chunks = await all<Source>(
     "SELECT c.id,c.document_id,c.ticker,c.page,c.text,d.period FROM document_chunks c JOIN documents d ON d.id=c.document_id WHERE c.document_id=? AND c.ticker=? ORDER BY c.page,CAST(substr(c.id,length(c.document_id)+length(CAST(c.page AS TEXT))+3) AS INTEGER)",
     documentId,
@@ -185,6 +195,43 @@ export async function extractDocument(ticker: string, documentId: string) {
     [...pageMap].map(([page, text]) => ({ page, text })),
   );
   prose.metrics.push(...table.metrics);
+  const layouts = await all<{ payload: string }>(
+    "SELECT payload FROM document_layouts WHERE document_id=? ORDER BY page",
+    documentId,
+  );
+  const company = await one<{ name: string }>(
+    "SELECT name FROM companies WHERE ticker=?",
+    ticker,
+  );
+  const original = await one<{ hash: string }>(
+    "SELECT hash FROM documents WHERE id=? AND ticker=?",
+    documentId,
+    ticker,
+  );
+  const registered = financialSources.find((c) => c.ticker === ticker);
+  const verified = registered && {
+    ...registered,
+    currency:
+      registered.currencyDocumentHash === original?.hash
+        ? registered.currency
+        : undefined,
+  };
+  const layout = extractPdfFinancials(
+    layouts.map((l) => JSON.parse(l.payload) as PdfLayout),
+    { ticker, name: company?.name ?? ticker },
+    verified,
+  );
+  prose.metrics.push(...layout.metrics);
+  for (const review of layout.reviews)
+    await run(
+      "INSERT INTO extraction_audit(id,document_id,method,status,reason,created_at) VALUES (?,?,?,?,?,?)",
+      crypto.randomUUID(),
+      documentId,
+      PDF_LAYOUT_VERSION,
+      "review",
+      `Page ${review.page}: ${review.reason}`,
+      new Date().toISOString(),
+    );
   for (const r of table.rejected)
     await run(
       "INSERT INTO extraction_audit(id,document_id,method,status,reason,created_at) VALUES (?,?,?,?,?,?)",
@@ -197,7 +244,7 @@ export async function extractDocument(ticker: string, documentId: string) {
     );
   const nowProse = new Date().toISOString();
   await run(
-    "UPDATE financial_metrics SET verification_status='unverified' WHERE document_id=? AND extraction_method IN ('explicit_prose_v1','explicit_table_v1','explicit_table_v2')",
+    "UPDATE financial_metrics SET verification_status='unverified' WHERE document_id=? AND extraction_method IN ('explicit_prose_v1','explicit_table_v1','explicit_table_v2','pdf_layout_v1','pdf_layout_v2','pdf_layout_v3')",
     documentId,
   );
   for (const m of prose.metrics) {
@@ -205,7 +252,7 @@ export async function extractDocument(ticker: string, documentId: string) {
       `${ticker}:${m.name}:${m.period}:${m.basis}:${documentId}`,
     );
     await run(
-      `INSERT INTO financial_metrics(id,ticker,name,value,period,unit,basis,document_id,page,evidence_text,extraction_method,verification_status,updated_at,currency,scale,fiscal_year,fiscal_quarter) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value,evidence_text=excluded.evidence_text,page=excluded.page,updated_at=excluded.updated_at,verification_status=excluded.verification_status WHERE financial_metrics.extraction_method IN ('explicit_prose_v1','explicit_table_v1','explicit_table_v2')`,
+      `INSERT INTO financial_metrics(id,ticker,name,value,period,unit,basis,document_id,page,evidence_text,extraction_method,verification_status,updated_at,currency,scale,fiscal_year,fiscal_quarter) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value,evidence_text=excluded.evidence_text,page=excluded.page,updated_at=excluded.updated_at,verification_status=excluded.verification_status WHERE financial_metrics.extraction_method IN ('explicit_prose_v1','explicit_table_v1','explicit_table_v2','pdf_layout_v1','pdf_layout_v2','pdf_layout_v3')`,
       id,
       ticker,
       m.name,
@@ -271,7 +318,14 @@ export async function extractDocument(ticker: string, documentId: string) {
       previous?.id ?? null,
     );
   }
-  if (!providerStatus().enabled)
+  if (options.preferDeterministic && layout.metrics.length)
+    return {
+      metrics: prose.metrics.length,
+      guidance: prose.guidance.length,
+      status: "verified_pdf_table",
+      ai_status: "not_required",
+    };
+  if (options.deterministicOnly || !providerStatus().enabled)
     return {
       metrics: prose.metrics.length,
       guidance: prose.guidance.length,
@@ -327,6 +381,25 @@ export async function extractDocument(ticker: string, documentId: string) {
       now,
     );
   for (const m of result.metrics) {
+    const deterministic = layout.metrics.filter(
+      (d) =>
+        d.name === m.name &&
+        d.period === m.period &&
+        /consolidated/i.test(d.basis) === /consolidated/i.test(m.basis),
+    );
+    if (deterministic.length) {
+      if (!deterministic.some((d) => d.value === m.value))
+        await run(
+          "INSERT INTO extraction_audit(id,document_id,method,status,reason,created_at) VALUES (?,?,?,?,?,?)",
+          crypto.randomUUID(),
+          documentId,
+          "gemini",
+          "rejected",
+          `${m.name} ${m.period}: model value conflicts with the verified PDF table column.`,
+          now,
+        );
+      continue;
+    }
     const source = sources.find((s) => s.id === m.source_id)!;
     const id = await sha(
       `${ticker}:${m.name}:${m.period}:${m.basis}:${m.unit}:${documentId}`,

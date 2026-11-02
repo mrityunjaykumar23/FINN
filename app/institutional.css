@@ -1465,3 +1465,48 @@ textarea:focus {
     scroll-behavior: auto !important;
   }
 }
+
+/* Live freshness and automatic financial preparation preserve the existing card system. */
+.snapshot-controls {
+  display: grid;
+  gap: 8px;
+}
+.snapshot-controls select {
+  width: 100%;
+  min-width: 0;
+}
+.snapshot-progress {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.market-row-state {
+  font-family: Geist, sans-serif;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: normal;
+}
+.market-row-retry {
+  border: 0;
+  background: transparent;
+  padding: 2px 0;
+  color: var(--finn-accent);
+  text-align: left;
+  font-family: Geist, sans-serif;
+  font-size: 12px;
+  cursor: pointer;
+}
+.market-explanation {
+  display: block;
+  font-family: Geist, sans-serif;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: normal;
+}
+.market-error {
+  color: var(--finn-warning);
+  overflow-wrap: anywhere;
+}

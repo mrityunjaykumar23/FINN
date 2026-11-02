@@ -1,0 +1,15 @@
+[
+  {
+    "ticker": "JPL.NS",
+    "name": "Jio Platforms Limited",
+    "url": "https://www.jio.com/about/investor-relations/financials/financials-results/",
+    "officialHost": "jio.com",
+    "yearEndMonth": 3,
+    "currency": "INR",
+    "calendarAndCurrencySource": "https://myjiostatic.cdn.jio.com/cms/assets/about/oct-26/Consolidated%20and%20Standalone%20unaudited%20financial%20results%20for%20the%20quarter%20and%20half%20year%20ended%20September%2030,%202026.pdf#page=6",
+    "verification": "Primary statement visually reviewed: year ended 31 March 2026; rupees in crore. No metric figures are configured here.",
+    "listingDate": "2026-10-28",
+    "listingSource": "https://rilstaticasset.akamaized.net/sites/default/files/2026-10/RIL_SE_271026.pdf",
+    "currencyDocumentHash": "be02a958bc583ef10b357e7d593a24cebb41d60e73d4c70edbc8f8c157fa8e9b"
+  }
+]

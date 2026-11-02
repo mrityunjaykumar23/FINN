@@ -1,3 +1,4 @@
+import financialSources from "../../data/financial-sources.json" with { type: "json" };
 export type Candidate = {
   url: string;
   title: string;
@@ -152,8 +153,95 @@ export async function locatePrimaryCandidates(
   ticker: string,
   allowed: (url: string, host?: string) => boolean,
 ) {
+  const registered = financialSources.find((s) => s.ticker === ticker);
+  if (registered) {
+    try {
+      const html = await fetchPublicDirectory(registered.url);
+      const urls = [
+        ...new Set(
+          [...html.matchAll(/https[^\s"<>]+\.pdf(?:\?[^"<>\s]*)?/gi)].map((m) =>
+            decode(m[0]),
+          ),
+        ),
+      ];
+      const candidates = urls
+        .filter((u) => allowed(u, registered.officialHost))
+        .map((url, order) => ({
+          url,
+          title: decodeURIComponent(new URL(url).pathname.split("/").at(-1)!)
+            .replace(/\.pdf$/i, "")
+            .replace(/[_-]/g, " "),
+          type: documentType(decodeURIComponent(url)),
+          published_at: null,
+          period: null,
+          officialHost: registered.officialHost,
+          order,
+        }));
+      if (candidates.length)
+        return { candidates, officialHost: registered.officialHost };
+    } catch {
+      /* A failed registered page can still use permitted directory originals. */
+    }
+  }
   const url = `https://www.screener.in/company/${encodeURIComponent(ticker.replace(/\.(NS|BO)$/, ""))}/consolidated/`;
-  return parseCandidates(await fetchPublicDirectory(url), allowed);
+  const html = await fetchPublicDirectory(url),
+    parsed = parseCandidates(html, allowed);
+  // Follow only the directory's own, narrowly scoped Raw-PDF redirect endpoints.
+  // The redirect target must be an independently permitted original PDF; directory
+  // financial tables and figures are never imported as evidence.
+  const raw = [
+    ...new Set(
+      [
+        ...html.matchAll(
+          /href=["'](\/company\/source\/quarter\/\d+\/\d{1,2}\/\d{4}\/)["']/g,
+        ),
+      ].map((m) => m[1]),
+    ),
+  ]
+    .sort((a, b) => {
+      const date = (s: string) => {
+        const p = s.split("/");
+        return Number(p.at(-2)) * 100 + Number(p.at(-3));
+      };
+      return date(b) - date(a);
+    })
+    .slice(0, 3);
+  const originals = await Promise.allSettled(
+    raw.map(async (path, order) => {
+      const r = await fetch("https://www.screener.in" + path, {
+        redirect: "manual",
+        signal: AbortSignal.timeout(5000),
+      });
+      const target = r.headers.get("location");
+      await r.body?.cancel();
+      if (![301, 302, 303, 307, 308].includes(r.status) || !target) return null;
+      const original = new URL(target, "https://www.screener.in").href;
+      if (
+        !/\.pdf(?:\?|$)/i.test(original) ||
+        !allowed(original, parsed.officialHost)
+      )
+        return null;
+      return {
+        url: original,
+        title: "Original quarterly financial results",
+        type: "results",
+        published_at: null,
+        period: null,
+        officialHost: parsed.officialHost,
+        order: order - 3,
+      };
+    }),
+  );
+  const first = originals.flatMap((r) =>
+    r.status === "fulfilled" && r.value ? [r.value] : [],
+  );
+  return {
+    ...parsed,
+    candidates: [
+      ...first,
+      ...parsed.candidates.filter((c) => !first.some((p) => p.url === c.url)),
+    ],
+  };
 }
 export async function fetchPublicDirectory(url: string) {
   let target = url,

@@ -21,7 +21,7 @@ type Job = {
 };
 export async function researchJob(owner: string, id: string) {
   const job = await one<Job>(
-    "SELECT * FROM research_jobs WHERE id=? AND owner_id=?",
+    "SELECT * FROM research_jobs WHERE id=? AND owner_id=? AND purpose='research'",
     id,
     owner,
   );

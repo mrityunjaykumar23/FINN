@@ -1,5 +1,14 @@
 import { extractionOutcome } from "../pipeline-state";
-import { all, one, run, sha, ApiError } from "../../db/repository";
+import {
+  all,
+  one,
+  run,
+  sha,
+  lock,
+  unlock,
+  ApiError,
+} from "../../db/repository";
+import { PDF_LAYOUT_VERSION } from "../pdf-financials";
 import { ingestPdf, safeSourceUrl } from "../server";
 import { extractDocument } from "../ai/service";
 export async function enqueueDocument(
@@ -27,11 +36,89 @@ export async function enqueueDocument(
   );
   return id;
 }
+// A new parser may recover an indexed source without resetting provider retry budgets.
+// Preserve the original attempt and error in the audit before changing its state.
+export async function upgradeDocumentLayout(ticker: string, jobId: string) {
+  const j = await one<{
+    id: string;
+    document_id: string | null;
+    url: string;
+    title: string;
+    official_host: string | null;
+    status: string;
+    attempts: number;
+    error: string | null;
+  }>("SELECT * FROM document_jobs WHERE id=? AND ticker=?", jobId, ticker);
+  if (!j?.document_id || ["running", "extracting"].includes(j.status)) return;
+  const version = await one<{ value: string }>(
+    "SELECT value FROM meta WHERE key=?",
+    `layout-checked:${j.document_id}`,
+  );
+  if (
+    version?.value === PDF_LAYOUT_VERSION ||
+    !(await lock(`layout-upgrade:${j.document_id}`, 90000))
+  )
+    return;
+  try {
+    const id = await ingestPdf(
+      ticker,
+      j.url,
+      j.title,
+      j.official_host ?? undefined,
+      { background: true },
+    );
+    const result = await extractDocument(ticker, id, {
+      preferDeterministic: true,
+      deterministicOnly: true,
+    });
+    await run(
+      "INSERT INTO extraction_audit(id,document_id,method,status,reason,created_at) VALUES (?,?,?,?,?,?)",
+      crypto.randomUUID(),
+      id,
+      PDF_LAYOUT_VERSION,
+      "parser_upgrade",
+      JSON.stringify({
+        prior_status: j.status,
+        prior_error: j.error,
+        provider_attempts: j.attempts,
+        prior_version: version?.value ?? null,
+        result,
+      }),
+      new Date().toISOString(),
+    );
+    const accepted = Number(result.metrics) > 0 || Number(result.guidance) > 0;
+    if (accepted)
+      await run(
+        "UPDATE document_jobs SET status='complete',extraction_status=?,extraction_result=?,error=NULL,next_retry=NULL,updated_at=? WHERE id=? AND status=?",
+        result.status,
+        JSON.stringify(result),
+        new Date().toISOString(),
+        j.id,
+        j.status,
+      );
+    else if (
+      !(await one(
+        "SELECT id FROM financial_metrics WHERE document_id=? AND verification_status<>'unverified' LIMIT 1",
+        id,
+      ))
+    )
+      await run(
+        "UPDATE document_jobs SET status=?,error=?,next_retry=NULL,updated_at=? WHERE id=? AND status=?",
+        j.attempts < 3 ? "extraction_pending" : "manual_required",
+        "New layout did not establish accepted financial facts; prior provider attempt count retained.",
+        new Date().toISOString(),
+        j.id,
+        j.status,
+      );
+  } finally {
+    await unlock(`layout-upgrade:${j.document_id}`);
+  }
+}
 export async function processDocumentJobs(
   limit = 1,
   ticker?: string,
   id?: string,
-  options: { indexOnly?: boolean } = {},
+  options: { indexOnly?: boolean; preferDeterministic?: boolean } = {},
 ) {
   const now = new Date().toISOString(),
     expired = new Date(Date.now() - 2 * 60000).toISOString();
@@ -111,7 +198,9 @@ export async function processDocumentJobs(
         });
         continue;
       }
-      const extraction = await extractDocument(j.ticker, id).catch(() => ({
+      const extraction = await extractDocument(j.ticker, id, {
+        preferDeterministic: options.preferDeterministic,
+      }).catch(() => ({
         status: "extraction_failed",
         error_code: "extraction_exception",
       }));

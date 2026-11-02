@@ -12,11 +12,19 @@ import {
   ShieldCheck,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { AlertSettings } from "./AlertSettings";
 import { Briefing } from "./Briefing";
-import { api, ErrorBox, Logo, navigation, View, Skeleton } from "./common";
+import {
+  api,
+  date,
+  ErrorBox,
+  Logo,
+  navigation,
+  View,
+  Skeleton,
+} from "./common";
 import { EventDetail } from "./Evidence";
 import { CompanySearch, Portfolio } from "./Portfolio";
 import { PromiseTracker } from "./PromiseTracker";
@@ -25,7 +33,9 @@ import { SourceDiscipline } from "./SourceDiscipline";
 import { FinnMark } from "./Brand";
 export default function Dashboard() {
   const [view, setView] = useState<View>("today"),
-    [mode, setMode] = useState("historical"),
+    [mode, setMode] = useState("live"),
+    [modeReady, setModeReady] = useState(false),
+    [marketRevision, setMarketRevision] = useState(0),
     [companies, setCompanies] = useState<Company[]>([]),
     [loading, setLoading] = useState(true),
     [error, setError] = useState("");
@@ -35,6 +45,30 @@ export default function Dashboard() {
     [toast, setToast] = useState(""),
     [revision, setRevision] = useState(0),
     [question, setQuestion] = useState("");
+  const forceMarket = useRef(false);
+  useEffect(() => {
+    let stored = "live";
+    try {
+      stored =
+        localStorage.getItem("finn.market-mode.v1") === "historical"
+          ? "historical"
+          : "live";
+    } catch {}
+    queueMicrotask(() => {
+      setMode(stored);
+      setModeReady(true);
+    });
+  }, []);
+  const selectMode = (next: string) => {
+    if (next !== mode) {
+      setCompanies([]);
+      setLoading(true);
+    }
+    setMode(next);
+    try {
+      localStorage.setItem("finn.market-mode.v1", next);
+    } catch {}
+  };
   const [showSources, setShowSources] = useState(false);
   const notify = useCallback((message: string) => {
     setToast(message);
@@ -45,6 +79,7 @@ export default function Dashboard() {
     return () => clearTimeout(timer);
   }, [toast]);
   useEffect(() => {
+    if (!modeReady) return;
     let active = true;
     queueMicrotask(() => {
       if (active) setLoading(true);
@@ -65,7 +100,65 @@ export default function Dashboard() {
     return () => {
       active = false;
     };
-  }, [revision, mode]);
+  }, [revision, mode, modeReady]);
+  useEffect(() => {
+    if (!modeReady || mode !== "live") return;
+    const controller = new AbortController(),
+      signal = controller.signal,
+      force = forceMarket.current;
+    forceMarket.current = false;
+    void (async () => {
+      for (let batch = 0; batch < 10; batch++) {
+        const work = await api<{
+          queued: string[];
+          pending: number;
+          running: number;
+          limited: boolean;
+        }>("portfolio/refresh-market", {
+          method: "POST",
+          body: JSON.stringify({ force }),
+          signal,
+        });
+        if (!work.queued.length && !work.running) break;
+        for (let poll = 0; poll < 15; poll++) {
+          await new Promise<void>((resolve, reject) => {
+            const timer = setTimeout(() => {
+              signal.removeEventListener("abort", cancel);
+              resolve();
+            }, 1500);
+            const cancel = () => {
+              clearTimeout(timer);
+              reject(new DOMException("Aborted", "AbortError"));
+            };
+            signal.addEventListener("abort", cancel, { once: true });
+          });
+          const result = await api<{ companies: Company[] }>(
+            "portfolio?mode=live",
+            { signal },
+          );
+          setCompanies(result.companies);
+          if (!result.companies.some((c) => c.market_freshness?.refreshing))
+            break;
+        }
+        if (!work.pending || work.limited) break;
+      }
+    })().catch(() => {
+      /* Per-company source state and retry controls remain visible. */
+    });
+    return () => controller.abort();
+  }, [revision, mode, modeReady, marketRevision]);
+  const latestSession = companies
+    .map((c) => c.date)
+    .filter((d): d is string => !!d)
+    .sort()
+    .at(-1);
+  const refreshMarket = () => {
+    notify(
+      "Checking market sources. Recent checks use the five-minute retry cooldown.",
+    );
+    forceMarket.current = true;
+    setMarketRevision((r) => r + 1);
+  };
   const researchCompany = (symbol: string, q = "") => {
     setTicker(symbol);
     setQuestion(q);
@@ -151,7 +244,11 @@ export default function Dashboard() {
           </div>
           <span className="header-mode">
             <span className="status-dot" />
-            {mode === "historical" ? "Replay · Apr 2025" : "Live sources"}
+            {mode === "historical"
+              ? "Replay · Apr 2025"
+              : latestSession
+                ? `Latest · ${new Date(latestSession + "T12:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`
+                : "Latest EOD"}
           </span>
           <button
             className="global-search"
@@ -190,25 +287,28 @@ export default function Dashboard() {
                 </>
               ) : (
                 <>
-                  <strong>Live mode</strong>
+                  <strong>Latest EOD</strong>
                   <span className="banner-detail">
                     {" "}
-                    · Source availability varies. No historical substitution.
+                    ·{" "}
+                    {latestSession
+                      ? `Latest verified session ${date(latestSession)}. Each company retains its own observation date.`
+                      : "Checking available completed NSE sessions. No historical substitution."}
                   </span>
                 </>
               )}
             </span>
             <button
               onClick={() => {
-                setMode(mode === "historical" ? "live" : "historical");
+                selectMode(mode === "historical" ? "live" : "historical");
                 notify(
                   mode === "historical"
-                    ? "Live mode selected. Refresh a company to fetch recent completed sessions."
+                    ? "Latest EOD selected. Missing or stale observations are checked automatically."
                     : "Historical replay selected.",
                 );
               }}
             >
-              {mode === "historical" ? "Try live mode" : "Back to demo"}
+              {mode === "historical" ? "Latest EOD" : "Historical Replay"}
               <ArrowRight size={12} />
             </button>
           </div>
@@ -238,6 +338,7 @@ export default function Dashboard() {
               onAdd={() => setSearch("portfolio")}
               onResearch={researchCompany}
               onChange={refreshPortfolio}
+              onRefreshMarket={refreshMarket}
               notify={notify}
             />
           )}

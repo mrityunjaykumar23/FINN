@@ -1,0 +1,606 @@
+{
+  "checked_at": "2026-11-02T21:49:10.711Z",
+  "base_url": "http://127.0.0.1:5173",
+  "suites": {
+    "unit": {
+      "tests": 89,
+      "pass": 89,
+      "fail": 0,
+      "skipped": 0
+    },
+    "api": {
+      "tests": 17,
+      "pass": 17,
+      "fail": 0,
+      "skipped": 0
+    },
+    "reliability": {
+      "tests": 4,
+      "pass": 4,
+      "fail": 0,
+      "skipped": 0
+    },
+    "gemini": {
+      "tests": 3,
+      "pass": 3,
+      "fail": 0,
+      "skipped": 0
+    },
+    "ingestion": {
+      "tests": 1,
+      "pass": 1,
+      "fail": 0,
+      "skipped": 0
+    },
+    "research_jobs": {
+      "tests": 1,
+      "pass": 1,
+      "fail": 0,
+      "skipped": 0
+    },
+    "cache": {
+      "tests": 1,
+      "pass": 1,
+      "fail": 0,
+      "skipped": 0
+    },
+    "demo": {
+      "tests": 1,
+      "pass": 1,
+      "fail": 0,
+      "skipped": 0
+    }
+  },
+  "total": {
+    "tests": 117,
+    "pass": 117,
+    "fail": 0,
+    "skipped": 0
+  },
+  "checks": {
+    "typecheck": true,
+    "lint": true,
+    "production_build": true,
+    "financial_validations": true
+  },
+  "browser": {
+    "mode_default_live": true,
+    "historical_reload_persistence": true,
+    "live_reload_persistence": true,
+    "jpl_period_selector": true,
+    "half_year_separate": true,
+    "standalone_separate": true,
+    "viewports": [
+      320,
+      375,
+      1440
+    ]
+  },
+  "migrations": {
+    "existing_tables": 33,
+    "preserved": true,
+    "before": {
+      "meta": 13,
+      "_cf_METADATA": 1,
+      "d1_migrations": 10,
+      "owners": 446,
+      "companies": 44,
+      "documents": 50,
+      "document_chunks": 3892,
+      "portfolio_companies": 7687,
+      "alert_preferences": 14,
+      "daily_prices": 1079,
+      "announcements": 26,
+      "financial_metrics": 144,
+      "alerts": 2438,
+      "analysis_cache": 130,
+      "guidance_statements": 16,
+      "guidance_comparisons": 4,
+      "ingestion_runs": 60,
+      "source_sync": 35,
+      "request_budgets": 162,
+      "ai_operations": 149,
+      "job_locks": 0,
+      "chunks_fts_data": 861,
+      "chunks_fts_idx": 802,
+      "chunks_fts_content": 3892,
+      "chunks_fts_docsize": 3892,
+      "chunks_fts_config": 1,
+      "metric_derivations": 18,
+      "company_versions": 32,
+      "discovery_candidates": 1089,
+      "extraction_audit": 99,
+      "document_jobs": 590,
+      "research_jobs": 15,
+      "chunks_fts": 3892
+    },
+    "after": {
+      "meta": 13,
+      "_cf_METADATA": 1,
+      "d1_migrations": 10,
+      "owners": 446,
+      "companies": 44,
+      "documents": 50,
+      "document_chunks": 3892,
+      "portfolio_companies": 7687,
+      "alert_preferences": 14,
+      "daily_prices": 1079,
+      "announcements": 26,
+      "financial_metrics": 144,
+      "alerts": 2438,
+      "analysis_cache": 130,
+      "guidance_statements": 16,
+      "guidance_comparisons": 4,
+      "ingestion_runs": 60,
+      "source_sync": 35,
+      "request_budgets": 162,
+      "ai_operations": 149,
+      "job_locks": 0,
+      "chunks_fts_data": 861,
+      "chunks_fts_idx": 802,
+      "chunks_fts_content": 3892,
+      "chunks_fts_docsize": 3892,
+      "chunks_fts_config": 1,
+      "metric_derivations": 18,
+      "company_versions": 32,
+      "discovery_candidates": 1089,
+      "extraction_audit": 99,
+      "document_jobs": 590,
+      "research_jobs": 15,
+      "chunks_fts": 3892
+    },
+    "integrity": {
+      "integrity_check": "ok"
+    },
+    "foreign_keys": []
+  },
+  "acceptance": {
+    "passed": true,
+    "market": {
+      "passed": true,
+      "latest": "2026-11-02",
+      "close": 1420.699951171875,
+      "sessions": 1,
+      "change": null,
+      "relative_volume": null,
+      "history_limitation": "Provider supplied fewer than two verified daily observations; change is unavailable."
+    },
+    "financial": [
+      {
+        "ticker": "JPL.NS",
+        "market": {
+          "date": "2026-11-02",
+          "close": 1420.699951171875,
+          "change": null,
+          "relative_volume": null,
+          "sessions": 1,
+          "latest_adjusted_close": 1420.699951171875
+        },
+        "before": {
+          "documents": 2,
+          "metrics": 45
+        },
+        "creation_ms": 38,
+        "total_ms": 6640,
+        "status": "complete",
+        "error": null,
+        "period": "Q2 FY2027",
+        "statuses": [
+          {
+            "name": "Revenue",
+            "state": "Verified value",
+            "metric": {
+              "id": "491db33a4d1c82f66f3574d5770764bca6b7e6f7309a5f2def26af4733f59323",
+              "ticker": "JPL.NS",
+              "name": "Revenue",
+              "value": 40475,
+              "period": "Q2 FY2027",
+              "unit": "INR crore",
+              "basis": "Consolidated reported INR",
+              "document_id": "live-b3414eaff4eb5f948ad1",
+              "page": 18,
+              "currency": "INR",
+              "scale": "crore",
+              "fiscal_year": 2027,
+              "fiscal_quarter": 2,
+              "period_start": null,
+              "period_end": null,
+              "value_type": "reported",
+              "calculation_method": null,
+              "extraction_method": "pdf_layout_v1",
+              "verification_status": "source_checked",
+              "updated_at": "2026-11-02T21:26:22.066Z",
+              "reporting_status": "reported",
+              "source_excerpt_length": 778
+            }
+          },
+          {
+            "name": "EBITDA",
+            "state": "Verified value",
+            "metric": {
+              "id": "9d492d2f7354eb98199ce60624c708ec83078c1f11c2f94d621f5c77ad5404fe",
+              "ticker": "JPL.NS",
+              "name": "EBITDA",
+              "value": 21879,
+              "period": "Q2 FY2027",
+              "unit": "INR crore",
+              "basis": "Consolidated reported INR",
+              "document_id": "live-b3414eaff4eb5f948ad1",
+              "page": 18,
+              "currency": "INR",
+              "scale": "crore",
+              "fiscal_year": 2027,
+              "fiscal_quarter": 2,
+              "period_start": null,
+              "period_end": null,
+              "value_type": "reported",
+              "calculation_method": null,
+              "extraction_method": "pdf_layout_v1",
+              "verification_status": "source_checked",
+              "updated_at": "2026-11-02T21:26:22.066Z",
+              "reporting_status": "reported",
+              "source_excerpt_length": 778
+            }
+          },
+          {
+            "name": "PBT",
+            "state": "Verified value",
+            "metric": {
+              "id": "2330840989a24d2739a0ca1dbcfc14b0262fd93cfdf55e57c3fc520069ff2e06",
+              "ticker": "JPL.NS",
+              "name": "PBT",
+              "value": 11259,
+              "period": "Q2 FY2027",
+              "unit": "INR crore",
+              "basis": "Consolidated reported INR",
+              "document_id": "live-be02a958bc583ef10b35",
+              "page": 6,
+              "currency": "INR",
+              "scale": "crore",
+              "fiscal_year": 2027,
+              "fiscal_quarter": 2,
+              "period_start": null,
+              "period_end": null,
+              "value_type": "reported",
+              "calculation_method": null,
+              "extraction_method": "pdf_layout_v1",
+              "verification_status": "source_checked",
+              "updated_at": "2026-11-02T21:26:20.185Z",
+              "reporting_status": "reported",
+              "source_excerpt_length": 3544
+            }
+          },
+          {
+            "name": "PAT",
+            "state": "Verified value",
+            "metric": {
+              "id": "0343680bcee55ff5752da34c59c5452ad3b4836b5d4fb3b9b1f6e96b5c098b48",
+              "ticker": "JPL.NS",
+              "name": "PAT",
+              "value": 8387,
+              "period": "Q2 FY2027",
+              "unit": "INR crore",
+              "basis": "Consolidated reported INR",
+              "document_id": "live-b3414eaff4eb5f948ad1",
+              "page": 18,
+              "currency": "INR",
+              "scale": "crore",
+              "fiscal_year": 2027,
+              "fiscal_quarter": 2,
+              "period_start": null,
+              "period_end": null,
+              "value_type": "reported",
+              "calculation_method": null,
+              "extraction_method": "pdf_layout_v1",
+              "verification_status": "source_checked",
+              "updated_at": "2026-11-02T21:26:22.066Z",
+              "reporting_status": "reported",
+              "source_excerpt_length": 778
+            }
+          }
+        ],
+        "financial_errors": [],
+        "documents": [
+          {
+            "id": "live-b3414eaff4eb5f948ad1",
+            "url": "https://myjiostatic.cdn.jio.com/cms/assets/about/oct-26/Financial-Presentation-Q2-Results-October-%2030-2026.pdf",
+            "type": "presentation",
+            "period": "Q2 FY2027",
+            "extraction_status": "complete"
+          },
+          {
+            "id": "live-be02a958bc583ef10b35",
+            "url": "https://www.bseindia.com/stockinfo/AnnPdfOpen.aspx?Pname=e676e9db-6f51-407d-be91-94755536346e.pdf",
+            "type": "results",
+            "period": "Q2 FY2027",
+            "extraction_status": "complete"
+          }
+        ]
+      },
+      {
+        "ticker": "INFY.NS",
+        "market": {
+          "date": "2026-10-30",
+          "close": 1185,
+          "change": 3.358046227649367,
+          "relative_volume": 0.7731779464001971,
+          "sessions": 62,
+          "latest_adjusted_close": 1185
+        },
+        "before": {
+          "documents": 6,
+          "metrics": 47
+        },
+        "creation_ms": 34,
+        "total_ms": 3263,
+        "status": "complete",
+        "error": null,
+        "period": "Q2 FY2027",
+        "statuses": [
+          {
+            "name": "Revenue",
+            "state": "Verified value",
+            "metric": {
+              "id": "77bcd6e0b7fab83988f99f69d49e678583be29ac57672c0eb31ec2af735628f6",
+              "ticker": "INFY.NS",
+              "name": "Revenue",
+              "value": 49244,
+              "period": "Q2 FY2027",
+              "unit": "INR crore",
+              "basis": "Consolidated reported INR",
+              "document_id": "live-65e459d2b8bc4ed1e754",
+              "page": 162,
+              "currency": "INR",
+              "scale": "crore",
+              "fiscal_year": 2027,
+              "fiscal_quarter": 2,
+              "period_start": null,
+              "period_end": null,
+              "value_type": "reported",
+              "calculation_method": null,
+              "extraction_method": "pdf_layout_v3",
+              "verification_status": "source_checked",
+              "updated_at": "2026-11-02T21:26:31.780Z",
+              "reporting_status": "reported",
+              "source_excerpt_length": 3097
+            }
+          },
+          {
+            "name": "EBITDA",
+            "state": "Insufficient source evidence",
+            "metric": null
+          },
+          {
+            "name": "PBT",
+            "state": "Verified value",
+            "metric": {
+              "id": "41b20102bfbf9f58974a084e72fc554415581ff75774ce3de11ccb33381c3ad0",
+              "ticker": "INFY.NS",
+              "name": "PBT",
+              "value": 11063,
+              "period": "Q2 FY2027",
+              "unit": "INR crore",
+              "basis": "Consolidated reported INR",
+              "document_id": "live-65e459d2b8bc4ed1e754",
+              "page": 162,
+              "currency": "INR",
+              "scale": "crore",
+              "fiscal_year": 2027,
+              "fiscal_quarter": 2,
+              "period_start": null,
+              "period_end": null,
+              "value_type": "reported",
+              "calculation_method": null,
+              "extraction_method": "pdf_layout_v2",
+              "verification_status": "source_checked",
+              "updated_at": "2026-11-02T21:26:31.780Z",
+              "reporting_status": "reported",
+              "source_excerpt_length": 3097
+            }
+          },
+          {
+            "name": "PAT",
+            "state": "Verified value",
+            "metric": {
+              "id": "9a380c3f0976d7ae8fef98da0724b36493b26dcb831a8e9c031e4d0e69cacb01",
+              "ticker": "INFY.NS",
+              "name": "PAT",
+              "value": 7838,
+              "period": "Q2 FY2027",
+              "unit": "INR crore",
+              "basis": "Consolidated reported INR",
+              "document_id": "live-65e459d2b8bc4ed1e754",
+              "page": 162,
+              "currency": "INR",
+              "scale": "crore",
+              "fiscal_year": 2027,
+              "fiscal_quarter": 2,
+              "period_start": null,
+              "period_end": null,
+              "value_type": "reported",
+              "calculation_method": null,
+              "extraction_method": "pdf_layout_v2",
+              "verification_status": "source_checked",
+              "updated_at": "2026-11-02T21:26:31.780Z",
+              "reporting_status": "reported",
+              "source_excerpt_length": 3097
+            }
+          }
+        ],
+        "financial_errors": [],
+        "documents": [
+          {
+            "id": "infy-annual",
+            "url": "https://www.infosys.com/investors/reports-filings/annual-report/annual/documents/infosys-ar-25.pdf",
+            "type": "annual_report",
+            "period": "FY2025",
+            "extraction_status": "partial"
+          },
+          {
+            "id": "infy-results",
+            "url": "https://www.infosys.com/investors/reports-filings/quarterly-results/2024-2025/q4/documents/ifrs-inr-press-release.pdf",
+            "type": "results",
+            "period": "FY2025",
+            "extraction_status": "complete"
+          },
+          {
+            "id": "live-65e459d2b8bc4ed1e754",
+            "url": "https://www.bseindia.com/stockinfo/AnnPdfOpen.aspx?Pname=26c12463-d44e-4050-bd47-b53cc294b4e0.pdf",
+            "type": "results",
+            "period": "Q2 FY2027",
+            "extraction_status": "complete"
+          },
+          {
+            "id": "infy-results-q3",
+            "url": "https://www.infosys.com/investors/reports-filings/quarterly-results/2024-2025/q3/documents/ifrs-inr-press-release.pdf",
+            "type": "results",
+            "period": "Q3 FY2025",
+            "extraction_status": "complete"
+          },
+          {
+            "id": "infy-call-q3",
+            "url": "https://www.infosys.com/investors/reports-filings/quarterly-results/2024-2025/q3/documents/transcripts/earningscall.pdf",
+            "type": "transcript",
+            "period": "Q3 FY2025",
+            "extraction_status": "complete"
+          },
+          {
+            "id": "infy-call-q4",
+            "url": "https://www.infosys.com/investors/reports-filings/quarterly-results/2024-2025/q4/documents/transcripts/earningscall.pdf",
+            "type": "transcript",
+            "period": "Q4 FY2025",
+            "extraction_status": "complete"
+          }
+        ]
+      },
+      {
+        "ticker": "DABUR.NS",
+        "market": {
+          "date": "2026-10-30",
+          "close": 365.6000061035156,
+          "change": -1.1891875395903715,
+          "relative_volume": 0.9320627215538948,
+          "sessions": 62,
+          "latest_adjusted_close": 365.6000061035156
+        },
+        "before": {
+          "documents": 1,
+          "metrics": 3
+        },
+        "creation_ms": 23,
+        "total_ms": 10519,
+        "status": "complete",
+        "error": null,
+        "period": "Q1 FY2027",
+        "statuses": [
+          {
+            "name": "Revenue",
+            "state": "Verified value",
+            "metric": {
+              "id": "b6cd8c15fc45241869ce985403f408ba16839d31d0d44344a4da50d84edb74a2",
+              "ticker": "DABUR.NS",
+              "name": "Revenue",
+              "value": 3764.39,
+              "period": "Q1 FY2027",
+              "unit": "INR crores",
+              "basis": "Consolidated, reported currency, Ind AS",
+              "document_id": "live-91b76a83170d098a21ba",
+              "page": 5,
+              "currency": "INR",
+              "scale": "crore",
+              "fiscal_year": 2027,
+              "fiscal_quarter": 1,
+              "period_start": null,
+              "period_end": null,
+              "value_type": "reported",
+              "calculation_method": null,
+              "extraction_method": "gemini",
+              "verification_status": "source_checked",
+              "updated_at": "2026-11-02T21:26:41.754Z",
+              "reporting_status": "reported",
+              "source_excerpt_length": 60
+            }
+          },
+          {
+            "name": "EBITDA",
+            "state": "Not disclosed in the verified source",
+            "metric": null
+          },
+          {
+            "name": "PBT",
+            "state": "Verified value",
+            "metric": {
+              "id": "031e33b49665b23f939f1e2163c822aef8871227cf3e6e209b0b17a09724231c",
+              "ticker": "DABUR.NS",
+              "name": "PBT",
+              "value": 755.65,
+              "period": "Q1 FY2027",
+              "unit": "INR crores",
+              "basis": "Consolidated, reported currency, Ind AS",
+              "document_id": "live-91b76a83170d098a21ba",
+              "page": 5,
+              "currency": "INR",
+              "scale": "crore",
+              "fiscal_year": 2027,
+              "fiscal_quarter": 1,
+              "period_start": null,
+              "period_end": null,
+              "value_type": "reported",
+              "calculation_method": null,
+              "extraction_method": "gemini",
+              "verification_status": "source_checked",
+              "updated_at": "2026-11-02T21:26:41.754Z",
+              "reporting_status": "reported",
+              "source_excerpt_length": 47
+            }
+          },
+          {
+            "name": "PAT",
+            "state": "Verified value",
+            "metric": {
+              "id": "601a73b27ce97d917cba064e8e6b587d0cb0dbd8904c2a92c5500f379eabb26a",
+              "ticker": "DABUR.NS",
+              "name": "PAT",
+              "value": 586.16,
+              "period": "Q1 FY2027",
+              "unit": "INR crores",
+              "basis": "Consolidated, reported currency, Ind AS",
+              "document_id": "live-91b76a83170d098a21ba",
+              "page": 5,
+              "currency": "INR",
+              "scale": "crore",
+              "fiscal_year": 2027,
+              "fiscal_quarter": 1,
+              "period_start": null,
+              "period_end": null,
+              "value_type": "reported",
+              "calculation_method": null,
+              "extraction_method": "gemini",
+              "verification_status": "source_checked",
+              "updated_at": "2026-11-02T21:26:41.754Z",
+              "reporting_status": "reported",
+              "source_excerpt_length": 64
+            }
+          }
+        ],
+        "financial_errors": [],
+        "documents": [
+          {
+            "id": "live-91b76a83170d098a21ba",
+            "url": "https://www.bseindia.com/stockinfo/AnnPdfOpen.aspx?Pname=ce1b1ea9-71f8-4609-a492-95aafc1c3e3c.pdf",
+            "type": "results",
+            "period": "Q1 FY2027",
+            "extraction_status": "complete"
+          },
+          {
+            "id": "live-e38e3c13cfce797d08c5",
+            "url": "https://www.bseindia.com/stockinfo/AnnPdfOpen.aspx?Pname=8225835c-d3d6-442f-93f7-1fb77d9ee815.pdf",
+            "type": "results",
+            "period": "Q4 FY2026",
+            "extraction_status": "complete"
+          }
+        ]
+      }
+    ]
+  }
+}

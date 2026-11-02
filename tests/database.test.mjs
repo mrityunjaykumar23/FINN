@@ -116,7 +116,7 @@ function fixture() {
     ),
   );
   for (const f of readdirSync("drizzle")
-    .filter((f) => /^000[6789].*\.sql$/.test(f))
+    .filter((f) => /^(?:000[6789]|001[01]).*\.sql$/.test(f))
     .sort())
     db.exec(readFileSync("drizzle/" + f, "utf8"));
   return db;
@@ -146,7 +146,7 @@ test("incremental migration works on empty database with enforced foreign keys",
     ),
   );
   for (const f of readdirSync("drizzle")
-    .filter((f) => /^000[6789].*\.sql$/.test(f))
+    .filter((f) => /^(?:000[6789]|001[01]).*\.sql$/.test(f))
     .sort())
     db.exec(readFileSync("drizzle/" + f, "utf8"));
   assert.equal(db.prepare("PRAGMA foreign_keys").get().foreign_keys, 1);
