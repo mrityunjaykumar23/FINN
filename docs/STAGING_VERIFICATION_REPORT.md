@@ -4,7 +4,7 @@
 
 Staging: https://finn-enam-staging-mrity.hazyanole2049.chatgpt.site (owner-private; sign in with its owner's ChatGPT account).
 
-The initial live acceptance passed on source `17a56348196890f5ca0967ccdee724e4d85bbee9`, staging Site version 2, encrypted environment revision 2. A final staging publication includes the visual QA record and corrects stale alert-settings scheduler wording. The source helper commits and pushes this branch to the staging Site's own repository; it does not push to GitHub. Exact source provenance is also retained by the native saved Site version.
+The final live build is staging **version 3**, source **`0f2bfdf283b0522f0df58b6934563c4c67b0274c`**, encrypted environment revision 2, deployment `appgdep_6ae8741b67848191a0e86f4276f48644`. Its native deployment status is `succeeded`; live endpoint and UI checks below were then performed. Initial full acceptance passed on source `17a56348196890f5ca0967ccdee724e4d85bbee9`, version 2. The final publication includes the visual QA record and corrects stale alert-settings scheduler wording. The source helper pushed only to the staging Site's own repository, not GitHub. Subsequent local documentation/screenshot commits do not alter the running code.
 
 The original public FINN Site remains at version 2 at https://finn-investment-intelligence-mrity.hazyanole2049.chatgpt.site. Its database, access policy, environment and schedules were not changed. Its hosting identity is retained in `.openai/production-hosting.json`. Replacing that deployment requires the user's approval. Staging is a separate hosted Site, not an in-place preview channel on production.
 
@@ -35,7 +35,7 @@ All **100 automated tests passed**, with no skipped acceptance tests:
 | Cache integration against an isolated production preview | 1 |
 | Fresh database demo preparation and idempotency | 1 |
 
-Type check and lint passed with zero errors or warnings. Production Worker builds and both native staging publications succeeded. The original independent financial validation scripts passed: 18 market summaries plus eight quarter facts; nine DMart values plus six percentage calculations; five Britannia facts with unsupported EBITDA excluded.
+Type check and lint passed with zero errors or warnings; both were repeated after the final wording correction. Production Worker builds and all three native staging publications succeeded. The build emits framework performance/static route-classification notices; actual live routes were tested. The original independent financial validation scripts passed: 18 market summaries plus eight quarter facts; nine DMart values plus six percentage calculations; five Britannia facts with unsupported EBITDA excluded.
 
 Local evidence is in ignored `.sites-runtime/staging-*.log`, `.sites-runtime/staging-migration-check.json` and `.sites-runtime/staging/*.json`. Operator tooling is `scripts/verify-preview.mjs`; its secrets enter hidden stdin and stay in memory.
 
@@ -47,7 +47,11 @@ Staging demo preparation ran twice with unchanged second-run counts: 17 primary 
 
 The prepared seed persisted through the version-1 to version-2 deployment. Subsequent live requests verified portfolio edits, alert preferences, dismissed alerts, cached research and stored document/metric counts. Native D1 reads independently confirmed persistent storage.
 
+After the final version-2 to version-3 redeploy, health returned `ok`; status retained 23 documents, 708 chunks, 16 announcements, 91 metrics and four guidance records. The browser retained its saved 7.5% price threshold, 17 unread alerts after marking one read, and the restored 18-company portfolio. The original outside-portfolio Gemini answer still returned `cached: true`, `ai_status: success` and eight original source references. This is actual redeployment persistence, not just a process-local mock.
+
 `GEMINI_API_KEY`, model settings, `ADMIN_TOKEN` and `SITES_SCHEDULED_TOKEN` are encrypted server environment entries (all `is_secret: true`). `.dev.vars` was preserved, remains ignored and is absent from the source/deployment archive. No local SQLite database was uploaded. The platform service-access header alone does not authorize scheduled writes; the application additionally validates its job-specific header. Unauthorized writers return 403.
+
+A deployed request carrying only platform service access was explicitly rejected with HTTP 403 (`admin_required`); adding the separate job authorization was required for the successful scheduled updates. No credentials were added to scheduler prompts or client bundles.
 
 ## Authentic live PUSH
 
@@ -65,11 +69,13 @@ Two independent visitors retained separate portfolios and settings. Adding Elect
 
 ## Scheduled updates
 
-The linked cloud schedule **Refresh FINN staging intelligence** is enabled and was read back from the staging Site: daily **09:30, 13:30, 18:30 and 20:30 Asia/Kolkata**. Discovery, bounded ingestion, owner alert evaluation and one queued document step run each time. The 20:30 run additionally refreshes completed NSE market sessions. Daily announcement checks cover weekend disclosures; exchange-calendar guards still govern prices.
+Requested timing was daily **09:30, 13:30, 18:30 and 20:30 Asia/Kolkata**, with market updates in the 20:30 run. The linked cloud task **Refresh FINN staging intelligence** was initially saved and read back with that recurrence. **Final host readback instead retained only `DTSTART;TZID=Asia/Kolkata:20261103T093000`, with no RRULE.** It remains enabled, but only the single 3 November 2026 09:30 next run is represented. Recurring scheduling is therefore **not verified and must be corrected through supported host task controls**. An idempotent retry returned the same task and single-run schedule; no duplicate task or local workaround scheduler was created. The existing task card was opened for inspection.
+
+The saved task prompt runs discovery, bounded ingestion, owner evaluation and one queued document step; at an evening 20:30 occurrence it also runs completed-session market updates. The authenticated writer itself is ready for those phases. With the current single-run host state, continuous announcement checks and automatic nightly market updates must not be claimed active.
 
 The exact intended service-access/application-authorization path was executed manually on the deployed Site: ten bounded requests refreshed all 19 distinct monitored symbols through the completed 2 November session, discovered registered sources, ingested two additional SBI filings, and evaluated both stored test visitors. Maruti's two PDF failures remained `partial`; NTPC and SBI continued. A further document-job step successfully indexed an original and accepted ten financial rows while rejecting two unsupported candidates. Its completion followed successful extraction. Final readback held 23 documents, 708 chunks, 16 announcements, 91 metrics and four guidance statements.
 
-Schedule creation and readback verify saved/enabled timing. **A future cloud-triggered execution has not yet been observed**; no such completion is claimed. First-run monitoring and review of source/provider errors remain necessary. The existing public production Site has no schedule added by this work.
+The final readback verifies the enabled single-run state, not the intended recurrence. **A future cloud-triggered execution has not yet been observed**; no such completion is claimed. Recurrence correction, first-run monitoring and review of source/provider errors remain necessary. The existing public production Site has no schedule added by this work.
 
 ## Visual acceptance
 
@@ -77,7 +83,7 @@ The deployed HTML, JavaScript, assets and API responses were tested through a te
 
 At 1440 × 1000, the live seven-day briefing displayed the two actual NTPC announcements, source coverage and EOD anomalies without horizontal overflow. At 375 × 812, the evidence dialog retained the exact original excerpt, primary PDF link and corrected date-only precision label without horizontal overflow. Mobile portfolio search/add completed against hosted D1; the added Electrosteel company survived reload, and removal restored the original 18 entries. Research independently selected Electrosteel outside that portfolio, returned a successful native Gemini answer, and displayed the BSE page-4 citation and the ₹48.4 crore PAT decimal. Its result also had no horizontal overflow. The promise tracker loaded all four source-linked comparisons and expanded the original Infosys guidance excerpt. Alert rules loaded hosted source status and persisted changes without regenerating the displayed 18 unread notifications.
 
-Screenshots: `screenshots/staging/desktop-briefing.png`, `mobile-evidence.png`, `mobile-portfolio.png`, `mobile-research.png` (all within the staging screenshot directory). These show hosted content through a local QA relay; they do not assert that the browser has completed Sites owner SSO. The owner's direct browser sign-in remains a separate access check pending completion.
+The final version-3 alert page displays the corrected hosted-updater explanation and has no horizontal overflow at either tested size. Screenshots in `screenshots/staging/`: `desktop-briefing.png`, `mobile-evidence.png`, `mobile-portfolio.png`, `mobile-research.png`, `mobile-promises.png`, `mobile-alerts.png` and `desktop-alerts-final.png`. These show hosted content through a local QA relay; they do not assert that the browser has completed Sites owner SSO. The owner's direct browser sign-in remains a separate access check pending completion. The viewport override was reset after QA.
 
 ## Remaining limitations
 
@@ -86,5 +92,6 @@ Screenshots: `screenshots/staging/desktop-briefing.png`, `mobile-evidence.png`, 
 - Financial extraction and citation checks are conservative, not exhaustive semantic assurance. Scanned PDFs needing OCR and some large/ambiguous documents require manual review; pending jobs are explicit.
 - Gemini and upstream sources depend on provider availability and quotas. The hosted audit recorded three `unsupported_classification` responses rejected by evidence validation; their source/rule fallback remained labelled. Successful real research and extraction operations were independently recorded. Retrieval fallback does not claim Gemini success.
 - The verified NSE calendar is for 2026. The updater requests maintenance before relying on an unverified year.
+- The host did not retain the requested recurring schedule. The updater passed manual live execution, but the enabled cloud task currently represents a single run; automatic continuous operation is not established.
 - Alerts are stored in-app. Browser push/phone delivery is not implemented. Per-browser session ownership is appropriate for the prototype, not a full identity/account system.
 - Staging is owner-private; external ENAM reviewers cannot access it until sharing/promotion is explicitly authorized. Production promotion requires configuring the original Site's own service secret, safely applying its migrations and preparing/verifying demo data there after approval.

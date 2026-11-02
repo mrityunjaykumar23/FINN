@@ -60,7 +60,7 @@ npm run job:local -- evaluate
 npm run job:local -- replay
 ```
 
-`sync` refreshes completed EOD observations for monitored tickers and evaluates all stored owners. Optional JSON `tickers` narrows the bounded job. `evaluate` checks current completed EOD sessions and material filings for stored owners; `replay` evaluates historical observations. These are callable background jobs independent of a browser. The isolated staging Site has an enabled cloud update schedule; its timing, authentication, verification and coverage limits are documented in [staging verification](docs/STAGING_VERIFICATION_REPORT.md). Browser push and phone delivery remain unavailable.
+`sync` refreshes completed EOD observations for monitored tickers and evaluates all stored owners. Optional JSON `tickers` narrows the bounded job. `evaluate` checks current completed EOD sessions and material filings for stored owners; `replay` evaluates historical observations. These are callable background jobs independent of a browser. The isolated staging Site has an authenticated updater and an enabled cloud task; final host readback retained a single next run rather than the requested recurrence. Recurring scheduling is not yet verified. See [staging verification](docs/STAGING_VERIFICATION_REPORT.md) for exact timing, authentication and coverage limits. Browser push and phone delivery remain unavailable.
 
 Notifications persist read/unread/dismiss state per visitor. Re-evaluation cannot duplicate an event or erase its lifecycle. Settings affect newly evaluated signals; history remains accessible.
 
