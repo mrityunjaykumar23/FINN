@@ -1,3 +1,4 @@
+import { financialAnalysis } from "./financial-analysis";
 import {
   all,
   one,
@@ -8,15 +9,25 @@ import {
   budget,
   ApiError,
 } from "../db/repository";
-import { locatePrimaryCandidates } from "./ingestion/discovery";
+import {
+  DISCOVERY_VERSION,
+  locatePrimaryCandidates,
+  rankCandidates,
+} from "./ingestion/discovery";
 import {
   enqueueDocument,
   processDocumentJobs,
   upgradeDocumentLayout,
 } from "./ingestion/document-jobs";
-import { PDF_LAYOUT_VERSION } from "./pdf-financials";
+import { financialExtractorVersion } from "./financial-store";
 import { safeSourceUrl } from "./server";
-import { selectMetric, sortPeriods } from "./periods";
+import { sortPeriods, latestFinancialPeriod } from "./periods";
+import {
+  snapshotMetricStates,
+  type MetricProgress,
+  type SnapshotSource,
+} from "./snapshot-state";
+import { financialSector } from "./financial-definitions";
 import type { Metric } from "./domain";
 type SnapshotJob = {
   id: string;
@@ -31,11 +42,12 @@ type SnapshotJob = {
   detail: string | null;
   updated_at: string;
 };
-const names = ["Revenue", "EBITDA", "PBT", "PAT"];
+const PIPELINE_VERSION = financialExtractorVersion + ":" + DISCOVERY_VERSION;
 export async function snapshotState(
   owner: string,
   ticker: string,
   requested?: string,
+  requestedBasis?: string,
 ) {
   const id = await sha(`financial-snapshot-v1:${owner}:${ticker}`);
   const job = await one<SnapshotJob>(
@@ -44,7 +56,7 @@ export async function snapshotState(
     owner,
   );
   const metrics = await all<Metric>(
-    "SELECT * FROM financial_metrics WHERE ticker=? AND verification_status<>'unverified'",
+    "SELECT m.*,d.url AS source_url,d.source_format FROM financial_metrics m JOIN documents d ON d.id=m.document_id WHERE m.ticker=? AND m.verification_status<>'unverified'",
     ticker,
   );
   const documents = await all<{
@@ -53,68 +65,53 @@ export async function snapshotState(
     type: string;
     period: string;
     extraction_status: string;
+    source_format: string;
   }>(
-    "SELECT id,url,type,period,extraction_status FROM documents WHERE ticker=?",
+    "SELECT id,url,type,period,extraction_status,source_format FROM documents WHERE ticker=?",
     ticker,
   );
   const periods = sortPeriods(
     metrics.filter((m) => m.value !== null).map((m) => m.period),
   );
-  const period =
-    requested ?? periods.find((p) => p.startsWith("Q")) ?? periods[0] ?? null;
+  const period = requested ?? latestFinancialPeriod(periods) ?? null;
   const selectedIds: string[] = job ? (JSON.parse(job.filters).ids ?? []) : [];
-  const children = await all<{
-    status: string;
-    error: string | null;
-    extraction_status: string | null;
-  }>(
-    `SELECT status,error,extraction_status FROM document_jobs WHERE ticker=? AND type IN ('results','presentation') ${selectedIds.length ? `AND id IN (${selectedIds.map(() => "?").join(",")})` : "AND 0=1"}`,
+  const children = await all<SnapshotSource>(
+    `SELECT id,status,document_id,error,error_code,failed_stage,url FROM document_jobs WHERE ticker=? ${selectedIds.length ? `AND id IN (${selectedIds.map(() => "?").join(",")})` : "AND 0=1"}`,
     ticker,
     ...selectedIds,
   );
-  const active = !!job && ["queued", "running"].includes(job.status);
-  const failures = children.filter((j) =>
-    ["failed", "extraction_failed", "manual_required"].includes(j.status),
+  const relevantDocs = children.flatMap((c) =>
+    c.document_id ? [c.document_id] : [],
   );
-  const source = await all<{ text: string }>(
-    "SELECT c.text FROM document_chunks c JOIN documents d ON d.id=c.document_id WHERE d.ticker=? AND d.type IN ('results','presentation') AND d.period=? AND d.extraction_status='complete' AND d.total_pages<=40",
+  const progress = relevantDocs.length
+    ? await all<MetricProgress>(
+        `SELECT * FROM metric_processing WHERE document_id IN (${relevantDocs.map(() => "?").join(",")})`,
+        ...relevantDocs,
+      )
+    : [];
+  const company = await one<{ name: string; sector: string }>(
+    "SELECT name,sector FROM companies WHERE ticker=?",
     ticker,
-    period,
   );
-  const sourceText = source.map((s) => s.text).join(" ");
-  const statuses = names.map((name) => {
-    const metric = selectMetric(metrics, name, period ?? undefined);
-    let state = metric
-      ? "Verified value"
-      : active
-        ? "Extraction in progress"
-        : job?.status === "failed" || failures.length
-          ? "Extraction failed"
-          : !job
-            ? "Not yet extracted"
-            : "Insufficient source evidence";
-    if (
-      !metric &&
-      !active &&
-      job?.status === "complete" &&
-      sourceText &&
-      children.some((j) => j.status === "complete") &&
-      !failures.length
-    ) {
-      const re =
-        name === "Revenue"
-          ? /revenue|sales/i
-          : name === "PAT"
-            ? /after tax|net profit|\bPAT\b/i
-            : name === "PBT"
-              ? /before tax|\bPBT\b/i
-              : /EBITDA|before interest.{0,30}depreciation/i;
-      state = re.test(sourceText)
-        ? "Insufficient source evidence"
-        : "Not disclosed in the verified source";
-    }
-    return { name, state, metric: metric ?? null };
+  const basis =
+    requestedBasis ??
+    (metrics.some((m) => /consolidated/i.test(m.basis))
+      ? "Consolidated"
+      : "Standalone");
+  const derived = snapshotMetricStates({
+    metrics,
+    period,
+    basis,
+    job,
+    sources: children,
+    progress,
+    financialSector: financialSector({ ticker, ...company }) === "financial",
   });
+  const failures = children.filter(
+    (c) =>
+      c.error &&
+      ["failed", "extraction_failed", "manual_required"].includes(c.status),
+  );
   return {
     id,
     ticker,
@@ -127,7 +124,36 @@ export async function snapshotState(
     periods,
     metrics,
     documents,
-    statuses,
+    basis,
+    sector: financialSector({ ticker, ...company }),
+    statuses: derived.statuses,
+    analysis: period
+      ? financialAnalysis(
+          metrics.filter((m) => new RegExp(basis, "i").test(m.basis)),
+          period,
+          financialSector({ ticker, ...company }),
+        )
+      : [],
+    readiness: derived.readiness,
+    source_states: children.map((c) => ({
+      ...c,
+      download_status: c.document_id
+        ? "complete"
+        : c.status === "running"
+          ? "downloading"
+          : c.failed_stage === "download" || c.status === "failed"
+            ? "failed"
+            : "not_started",
+      indexing_status: c.document_id ? "complete" : "not_started",
+      financial_status:
+        c.status === "complete"
+          ? "complete"
+          : c.status === "extracting"
+            ? "extracting"
+            : c.failed_stage === "extraction"
+              ? "failed"
+              : "not_started",
+    })),
     financial_errors: failures.map((j) => j.error).filter(Boolean),
   };
 }
@@ -143,19 +169,19 @@ export async function createSnapshot(
     id,
     owner,
     ticker,
-    JSON.stringify({ version: PDF_LAYOUT_VERSION, force_discovery: force }),
+    JSON.stringify({ version: PIPELINE_VERSION, force_discovery: force }),
     now,
     now,
   );
   await run(
     "UPDATE research_jobs SET status='queued',phase='discovery',attempts=0,error=NULL,detail=NULL,filters=?,updated_at=? WHERE id=? AND status IN ('complete','failed') AND (updated_at<? OR (?=1 AND updated_at<?) OR coalesce(json_extract(filters,'$.version'),'')<>?)",
-    JSON.stringify({ version: PDF_LAYOUT_VERSION, force_discovery: force }),
+    JSON.stringify({ version: PIPELINE_VERSION, force_discovery: force }),
     now,
     id,
     new Date(Date.now() - 86400000).toISOString(),
     force ? 1 : 0,
     new Date(Date.now() - 60000).toISOString(),
-    PDF_LAYOUT_VERSION,
+    PIPELINE_VERSION,
   );
   return snapshotState(owner, ticker);
 }
@@ -210,11 +236,16 @@ export async function runSnapshot(job: SnapshotJob) {
         `snapshot-candidates:${job.ticker}`,
       );
       let saved = cached
-        ? (JSON.parse(cached.value) as { at: string; ids: string[] })
+        ? (JSON.parse(cached.value) as {
+            at: string;
+            ids: string[];
+            version?: string;
+          })
         : null;
       const forceDiscovery = JSON.parse(job.filters).force_discovery === true;
       if (
         !saved ||
+        saved.version !== DISCOVERY_VERSION ||
         Date.parse(saved.at) < Date.now() - 86400000 ||
         (forceDiscovery && Date.parse(saved.at) < Date.now() - 5 * 60000)
       ) {
@@ -231,14 +262,44 @@ export async function runSnapshot(job: SnapshotJob) {
             job.ticker,
             safeSourceUrl,
           );
+          await run(
+            "INSERT OR REPLACE INTO meta(key,value) VALUES (?,?)",
+            `source-catalogue:${job.ticker}`,
+            JSON.stringify({
+              at: new Date().toISOString(),
+              version: DISCOVERY_VERSION,
+              result,
+            }),
+          );
+          const existing = await all<{
+            url: string;
+            title: string;
+            type: string;
+            period: string;
+            source_format: string;
+          }>(
+            "SELECT url,title,type,period,source_format FROM documents WHERE ticker=? AND type IN ('results','annual_report','presentation') ORDER BY retrieved_at DESC",
+            job.ticker,
+          );
+          const ranked = rankCandidates(
+            [
+              ...existing
+                .filter((d) => d.source_format !== "pdf")
+                .map((d, i) => ({
+                  ...d,
+                  published_at: null,
+                  order: i - 20,
+                  officialHost: new URL(d.url).hostname.replace(/^www\./, ""),
+                })),
+              ...result.candidates,
+            ],
+            "latest financial results",
+          );
           const chosen = [
-            result.candidates.find(
-              (c) =>
-                c.type === "results" &&
-                !/media|integrated|newspaper|invitation/i.test(c.title),
-            ),
-            result.candidates.find((c) => c.type === "presentation"),
-          ].filter((c) => !!c);
+            ...ranked.filter((c) => c.type === "results").slice(0, 3),
+            ...ranked.filter((c) => c.type === "presentation").slice(0, 1),
+            ...ranked.filter((c) => c.type === "annual_report").slice(0, 1),
+          ].filter((c, i, a) => a.findIndex((x) => x.url === c.url) === i);
           if (!chosen.length)
             throw Error(
               "No permitted original financial results or presentation was found. Financial coverage is incomplete; verified older values remain available.",
@@ -246,7 +307,11 @@ export async function runSnapshot(job: SnapshotJob) {
           const ids = [];
           for (const c of chosen)
             ids.push(await enqueueDocument(job.ticker, c));
-          saved = { at: new Date().toISOString(), ids };
+          saved = {
+            at: new Date().toISOString(),
+            ids,
+            version: DISCOVERY_VERSION,
+          };
           await run(
             "INSERT OR REPLACE INTO meta(key,value) VALUES (?,?)",
             `snapshot-candidates:${job.ticker}`,
@@ -262,11 +327,18 @@ export async function runSnapshot(job: SnapshotJob) {
         JSON.stringify({
           ids: saved.ids,
           index: 0,
-          version: PDF_LAYOUT_VERSION,
+          version: PIPELINE_VERSION,
+          force_retry: forceDiscovery,
         }),
         saved.ids[0],
       );
     } else if (job.phase === "indexing") {
+      if (JSON.parse(job.filters).force_retry)
+        await run(
+          "UPDATE document_jobs SET status='extraction_pending',next_retry=NULL WHERE id=? AND document_id IS NOT NULL AND status='manual_required' AND attempts<3 AND updated_at<?",
+          job.document_job_id,
+          new Date(Date.now() - 60000).toISOString(),
+        );
       await processDocumentJobs(
         1,
         job.ticker,
@@ -334,7 +406,7 @@ export async function runSnapshot(job: SnapshotJob) {
       if (index < filters.ids.length) {
         await next(
           "indexing",
-          "Checking the original presentation for additional explicitly disclosed metrics.",
+          "Checking the next independent original source for additional explicitly disclosed metrics.",
           JSON.stringify({ ...filters, index }),
           filters.ids[index],
         );

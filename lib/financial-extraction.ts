@@ -1,3 +1,4 @@
+import { fiscalLabel, financialHeaderDate } from "./pdf-financials.ts";
 import type { Metric } from "./domain.ts";
 export type ExtractedMetric = Omit<
   Metric,
@@ -27,7 +28,7 @@ const fiscal = (raw: string) => {
   const n = Number(raw);
   return n < 100 ? 2000 + n : n;
 };
-const period = (s: string) => {
+const period = (s: string, yearEndMonth?: number) => {
   const q = s.match(/Q([1-4])\s*FY\s*['’]?\s*(\d{2,4})/i);
   if (q) return `Q${q[1]} FY${fiscal(q[2])}`;
   const y = s.match(/FY\s*['’]?\s*(\d{2,4})/i);
@@ -39,18 +40,32 @@ const period = (s: string) => {
   const date = s.match(
     /(quarter|year) ended\s+(March|June|September|December)\s+\d{1,2},?\s*(\d{4})/i,
   );
-  if (!date) return null;
+  if (!date || !yearEndMonth) return null;
   const month = ["march", "june", "september", "december"].indexOf(
-      date[2].toLowerCase(),
-    ),
-    year = Number(date[3]) + (month === 0 ? 0 : 1);
-  return date[1].toLowerCase() === "quarter"
-    ? `Q${[4, 1, 2, 3][month]} FY${year}`
-    : `FY${year}`;
+    date[2].toLowerCase(),
+  );
+  return fiscalLabel(
+    [3, 6, 9, 12][month],
+    Number(date[3]),
+    yearEndMonth,
+    date[1].toLowerCase() === "quarter" ? "quarter" : "year",
+  );
 };
 const number = (s: string) => Number(s.replaceAll(",", ""));
 /** Conservative grammar for explicit INR crore prose. No inferred EBITDA, table-column guesses or fabricated periods. */
-export function extractReportedProse(pages: { page: number; text: string }[]) {
+export function extractReportedProse(
+  pages: { page: number; text: string }[],
+  yearEndMonth?: number,
+) {
+  // A dated heading alone never establishes an Indian March fiscal calendar.
+  if (!yearEndMonth) {
+    const whole = pages.map((p) => p.text).join(" ");
+    const annual = whole.match(
+      /(?:for the )?year ended\s+((?:\d{1,2}\s+)?(?:March|June|September|December)\s+\d{1,2},?\s+20\d{2})\s*\(FY\s*['’]?(\d{2,4})\)/i,
+    );
+    const date = annual ? financialHeaderDate(annual[1]) : null;
+    if (date && date.year === fiscal(annual![2])) yearEndMonth = date.month;
+  }
   const metrics: ExtractedMetric[] = [],
     guidance: ExtractedGuidance[] = [];
   let basis: string | null = null,
@@ -68,7 +83,7 @@ export function extractReportedProse(pages: { page: number; text: string }[]) {
         continue;
       }
       if (/^For the (Quarter|Year) ended/i.test(sections[i])) {
-        contextPeriod = period(sections[i]);
+        contextPeriod = period(sections[i], yearEndMonth);
         continue;
       }
       if (/^For the (Nine|Six) Months ended/i.test(sections[i])) {
@@ -80,14 +95,14 @@ export function extractReportedProse(pages: { page: number; text: string }[]) {
       const heading = lines.match(
         /For the (Quarter|Year) ended.{0,65}\(([^)]+)\)/i,
       );
-      if (heading) contextPeriod = period(heading[2]);
+      if (heading) contextPeriod = period(heading[2], yearEndMonth);
       const reports = lines.matchAll(
         /(Total Revenue|Revenue from operations|Earnings before Interest, Tax, Depreciation and Amortization \(EBITDA\)|EBITDA|Net Profit|PAT|PBT|Profit before tax)(?:\s+(?:for|in)\s+([^.;]{1,90}?))?\s+(?:stood at|of|was|at)\s*(?:Rs\.?|INR|₹)\s*([\d,]+(?:\.\d+)?)\s*crore\b([^.;]*(?:[.;]|$))/gi,
       );
       for (const m of reports) {
         if (/nine.months|six.months|half.year|(?:9M|6M)\s*FY/i.test(m[0]))
           continue;
-        const currentPeriod = period(m[0]) ?? contextPeriod;
+        const currentPeriod = period(m[0], yearEndMonth) ?? contextPeriod;
         if (!basis || !currentPeriod) continue;
         const name = /revenue/i.test(m[1])
           ? "Revenue"
@@ -187,7 +202,10 @@ export function extractReportedProse(pages: { page: number; text: string }[]) {
 }
 
 /** Delimited text tables only. Never guess flattened PDF column alignment. */
-export function extractExplicitTables(pages: { page: number; text: string }[]) {
+export function extractExplicitTables(
+  pages: { page: number; text: string }[],
+  yearEndMonth?: number,
+) {
   const metrics: ExtractedMetric[] = [],
     rejected: { page: number; reason: string }[] = [];
   const names: [RegExp, string][] = [
@@ -253,7 +271,7 @@ export function extractExplicitTables(pages: { page: number; text: string }[]) {
       const cells = split(line),
         columns = cells
           .slice(1)
-          .map((p) => ({ raw: p, normalized: period(p) }));
+          .map((p) => ({ raw: p, normalized: period(p, yearEndMonth) }));
       if (
         columns.length &&
         columns.every(
@@ -286,7 +304,7 @@ export function extractExplicitTables(pages: { page: number; text: string }[]) {
           name,
           value:
             Number(raw.replace(/[(),]/g, "")) * (raw.startsWith("(") ? -1 : 1),
-          period: period(periods[k])!,
+          period: period(periods[k], yearEndMonth)!,
           unit: `INR ${scale}`,
           basis,
           page: page.page,

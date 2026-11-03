@@ -1,9 +1,12 @@
+import { sameFinancialUnit } from "../financial-context.ts";
 import { financialLabelSupported } from "../financial-labels.ts";
 import { z } from "zod";
 import { categories, type Metric } from "../domain.ts";
 import { AiFailure, type Transport } from "./gemini.ts";
 
 export type Source = {
+  context_text?: string;
+  source_format?: string;
   id: string;
   document_id: string;
   ticker: string;
@@ -344,7 +347,7 @@ export const metricExtraction = z.object({
     "Revenue growth",
   ]),
   value: z.number().finite(),
-  period: z.string().regex(/^(?:Q[1-4] )?FY\d{4}$/),
+  period: z.string().regex(/^(?:(?:Q[1-4]|H[12]) )?FY\d{4}$/),
   unit: z.string().min(1),
   basis: z.string().min(4),
   source_id: z.string(),
@@ -418,7 +421,7 @@ export async function extractFinancialMetrics(
 ) {
   const response = await transport({
     model,
-    task: "Extract at most 12 explicitly reported financial values and 3 explicit quantified forward guidance statements. Prioritize current quarter revenue, EBITDA, PBT and PAT plus prior quarter and prior-year comparable values, only where reported. Copy short exact excerpts (at most 350 characters) and value_text. Periods MUST use Q4 FY2025 or FY2025 format with four-digit ending year, and only if unambiguous. Include currency/scale in unit and consolidated/standalone plus accounting standard and constant/reported currency in basis. Never derive EBITDA or invent missing facts. Total income is not revenue; use Total income when that is the source label. EBITDA margin is not operating margin. Use Debt for gross/net debt, and Borrowings only when explicitly labelled borrowings. Keep subsidiary and company scopes separate in basis. Exclude vague optimism. Basis must be supported in the page. Return empty arrays for uncertain facts.",
+    task: "Extract at most 12 explicitly reported financial values and 3 explicit quantified forward guidance statements. Prioritize current quarter revenue, EBITDA, PBT and PAT plus prior quarter and prior-year comparable values, only where reported. Copy short exact excerpts (at most 350 characters) and value_text. Periods MUST use Qn FYyyyy, Hn FYyyyy or FYyyyy format with four-digit ending year, and only if unambiguous. Include currency/scale in unit and consolidated/standalone plus accounting standard and constant/reported currency in basis. Never derive EBITDA or invent missing facts. Total income is not revenue; use Total income when that is the source label. EBITDA margin is not operating margin. Use Debt for gross/net debt, and Borrowings only when explicitly labelled borrowings. Keep subsidiary and company scopes separate in basis. Exclude vague optimism. Basis must be supported in the page. Return empty arrays for uncertain facts.",
     data: { ticker, sources },
     schema: {
       type: "object",
@@ -460,7 +463,7 @@ export async function extractFinancialMetrics(
     )
       return false;
     if (!numbers(m.value_text).some((n) => n === m.value)) return false;
-    const context = clean(s.text);
+    const context = clean(s.text + " " + (s.context_text ?? ""));
     // Retrieval aliases are not accounting equivalences. Operating profit alone
     // cannot establish EBITDA, even when the amount and source ID are genuine.
     const labelContext = clean(m.evidence_excerpt);
@@ -494,8 +497,17 @@ export async function extractFinancialMetrics(
       return false;
     if (/standalone/i.test(m.basis) && !context.includes("standalone"))
       return false;
-    if (/crore/i.test(m.unit) && !context.includes("crore")) return false;
-    if (/million/i.test(m.unit) && !context.includes("million")) return false;
+    if (
+      /crore|million|lakh|billion|Rs\.?|INR|USD|₹/i.test(m.unit) &&
+      !sameFinancialUnit(m.unit, s.text)
+    )
+      return false;
+    if (
+      /^(?:Q[1-4]|H[12]) FY\d{4}$/.test(s.period ?? "") &&
+      m.period.startsWith("FY")
+    )
+      return false;
+    if (/^H[12]/.test(s.period ?? "") && m.period !== s.period) return false;
     return true;
   });
   const acceptedGuidance = parsed.guidance.filter((g) => {

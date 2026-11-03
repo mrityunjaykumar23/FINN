@@ -13,12 +13,15 @@ async function request(path, method = "GET", body) {
 }
 test("health, persisted portfolio, and authentic daily observations", async () => {
   assert.equal((await request("health")).status, 200);
-  const { data } = await request("portfolio");
+  const { data } = await request("portfolio?mode=historical");
   assert.equal(data.companies.length, 18);
   assert.ok(
     data.companies.every((c) => c.close > 0 && c.date === "2025-04-22"),
   );
-  assert.equal((await request("market/INFY.NS")).data.points.length, 32);
+  assert.equal(
+    (await request("market/INFY.NS?mode=historical")).data.points.length,
+    32,
+  );
 });
 test("search inside and outside the portfolio is not coupled to watchlist membership", async () => {
   for (const q of ["TCS", "ASIANPAINT", "PERSISTENT", "DMART"]) {
@@ -35,7 +38,7 @@ test("add/remove is persistent and idempotent", async () => {
           .status,
         200,
       );
-    const p = await request("portfolio");
+    const p = await request("portfolio?mode=historical");
     assert.equal(
       p.data.companies.filter((c) => c.ticker === "ASIANPAINT.NS").length,
       1,
@@ -43,10 +46,13 @@ test("add/remove is persistent and idempotent", async () => {
   } finally {
     await request("portfolio/ASIANPAINT.NS", "DELETE");
   }
-  assert.equal((await request("portfolio")).data.companies.length, 18);
+  assert.equal(
+    (await request("portfolio?mode=historical")).data.companies.length,
+    18,
+  );
 });
 test("windowed digest separates material filings and lower-priority source context", async () => {
-  const { data } = await request("digest?days=7");
+  const { data } = await request("digest?mode=historical&days=7");
   assert.ok(data.events.some((f) => f.id === "infy-fy25-results"));
   assert.ok(data.events.some((f) => f.id === "hcl-fy25-results"));
   assert.ok(data.events.every((f) => f.score >= 50));
@@ -57,13 +63,16 @@ test("windowed digest separates material filings and lower-priority source conte
   assert.ok(data.monitored_companies <= 18);
   assert.ok(data.market_alerts.length > 0);
   assert.equal(
-    (await request("digest?start=2025-02-01&end=2025-02-02")).data.events
-      .length,
+    (await request("digest?mode=historical&start=2025-02-01&end=2025-02-02"))
+      .data.events.length,
     0,
   );
   assert.equal(
-    (await request("digest?days=7&ticker=INFY.NS&category=results")).data.events
-      .length,
+    (
+      await request(
+        "digest?mode=historical&days=7&ticker=INFY.NS&category=results",
+      )
+    ).data.events.length,
     1,
   );
   const event = await request("announcements/infy-fy25-results");
@@ -77,7 +86,8 @@ test("stored alert settings change the evaluation of real EOD observations", asy
     const next = { ...initial, price_threshold: 0.1, volume_multiplier: 1 };
     assert.equal((await request("alerts/settings", "PUT", next)).status, 200);
     assert.equal((await request("alerts/settings")).data.price_threshold, 0.1);
-    const alerts = (await request("digest?days=1")).data.market_alerts;
+    const alerts = (await request("digest?mode=historical&days=1")).data
+      .market_alerts;
     assert.ok(alerts.length > 1);
     assert.ok((await request("alerts")).data.alerts.length > 0);
   } finally {
@@ -148,8 +158,8 @@ test("validation, missing evidence, and protected ingestion return structured er
     ["research", "POST", { ticker: "INFY.NS", question: "a" }, 422],
     ["announcements/missing", "GET", null, 404],
     ["documents/missing", "GET", null, 404],
-    ["digest?days=nope", "GET", null, 422],
-    ["digest?start=2025-02-31", "GET", null, 422],
+    ["digest?mode=historical&days=nope", "GET", null, 422],
+    ["digest?mode=historical&start=2025-02-31", "GET", null, 422],
     ["alerts/settings", "PUT", { price_threshold: -4 }, 422],
   ]) {
     const r = await request(path, method, body);

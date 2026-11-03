@@ -1,4 +1,5 @@
 "use client";
+import { sourceHref } from "@/lib/source-references";
 
 import {
   Activity,
@@ -100,14 +101,16 @@ export function SourceLink({
   url,
   children = "Original source",
   page,
+  format,
 }: {
+  format?: string;
   url: string;
   children?: ReactNode;
   page?: number;
 }) {
   return url ? (
     <a
-      href={page ? `${url.split("#")[0]}#page=${page}` : url}
+      href={sourceHref(url, page, format)}
       target="_blank"
       rel="noreferrer"
       className="source-link"

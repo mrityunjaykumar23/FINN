@@ -147,6 +147,52 @@ export default function Dashboard() {
     });
     return () => controller.abort();
   }, [revision, mode, modeReady, marketRevision]);
+  useEffect(() => {
+    if (!modeReady || mode !== "live") return;
+    const abort = new AbortController(),
+      signal = abort.signal;
+    type Check = {
+      id: string | null;
+      status: string;
+      pending: number;
+      error?: string;
+    };
+    void (async () => {
+      for (let batch = 0; batch < 10 && !signal.aborted; batch++) {
+        let check = await api<Check>("portfolio/monitor", {
+          method: "POST",
+          body: "{}",
+          signal,
+        });
+        if (!check.id) break;
+        for (let step = 0; step < 120 && !signal.aborted; step++) {
+          if (["complete", "failed"].includes(check.status)) break;
+          if (check.status === "queued")
+            await api(`portfolio/monitor/${check.id}/advance`, {
+              method: "POST",
+              body: "{}",
+              signal,
+            });
+          await new Promise<void>((resolve) => {
+            const done = () => {
+              clearTimeout(timer);
+              signal.removeEventListener("abort", done);
+              resolve();
+            };
+            const timer = setTimeout(done, 1500);
+            signal.addEventListener("abort", done, { once: true });
+          });
+          if (signal.aborted) return;
+          check = await api<Check>(`portfolio/monitor/${check.id}`, { signal });
+        }
+        if (check.status === "complete") setRevision((r) => r + 1);
+        if (check.status !== "complete" || !check.pending) break;
+      }
+    })().catch(() => {
+      /* Source coverage and safe failures remain visible in briefing and Sources. */
+    });
+    return () => abort.abort();
+  }, [modeReady, mode]);
   const latestSession = companies
     .map((c) => c.date)
     .filter((d): d is string => !!d)
@@ -355,7 +401,11 @@ export default function Dashboard() {
             />
           )}
           {view === "promises" && (
-            <PromiseTracker onResearch={researchCompany} />
+            <PromiseTracker
+              onResearch={researchCompany}
+              mode={mode}
+              revision={revision}
+            />
           )}
           {view === "settings" && (
             <AlertSettings

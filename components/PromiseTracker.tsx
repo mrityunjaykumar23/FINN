@@ -28,7 +28,11 @@ import {
 } from "./common";
 export function PromiseTracker({
   onResearch,
+  mode,
+  revision,
 }: {
+  mode: string;
+  revision: number;
   onResearch: (t: string, q?: string) => void;
 }) {
   const [comparisons, setComparisons] = useState<GuidanceResult[]>([]),
@@ -36,11 +40,11 @@ export function PromiseTracker({
     [loading, setLoading] = useState(true),
     [error, setError] = useState("");
   useEffect(() => {
-    api<{ comparisons: GuidanceResult[] }>("guidance")
+    api<{ comparisons: GuidanceResult[] }>(`guidance?mode=${mode}`)
       .then((r) => setComparisons(r.comparisons))
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [mode, revision]);
   return (
     <>
       <div className="page-heading">
@@ -80,7 +84,11 @@ export function PromiseTracker({
           Guidance vs. delivery{" "}
           <span className="count-pill">{comparisons.length}</span>
         </h2>
-        <span className="muted">Stored primary-source comparisons</span>
+        <span className="muted">
+          {mode === "historical"
+            ? "Historical primary-source comparisons"
+            : "Latest stored target per company and metric · check reporting dates"}
+        </span>
       </div>
       <label className="muted">
         Company{" "}

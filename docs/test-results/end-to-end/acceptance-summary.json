@@ -1,0 +1,90 @@
+{
+  "date": "2026-11-03",
+  "named_tests": 136,
+  "passed": 136,
+  "failed": 0,
+  "skipped": 0,
+  "suites": {
+    "unit_database": 108,
+    "api": 17,
+    "reliability_api": 4,
+    "native_gemini": 3,
+    "research_jobs": 1,
+    "authentic_ingestion": 1,
+    "fresh_cache": 1,
+    "fresh_demo": 1
+  },
+  "typecheck": "pass",
+  "lint": "pass",
+  "production_build": "pass",
+  "no_deployment": true,
+  "localhost": "http://127.0.0.1:5173/",
+  "automatic_ajanta": {
+    "period": "Q2 FY2027",
+    "basis": "Consolidated",
+    "readiness": "ready",
+    "metrics": [
+      {
+        "name": "Revenue",
+        "state": "Verified",
+        "value": 1794
+      },
+      {
+        "name": "EBITDA",
+        "state": "Verified",
+        "value": 543
+      },
+      {
+        "name": "PBT",
+        "state": "Verified",
+        "value": 535
+      },
+      {
+        "name": "PAT",
+        "state": "Verified",
+        "value": 388
+      }
+    ]
+  },
+  "nse_ajanta": {
+    "Revenue": 1794.16,
+    "EBITDA": 543,
+    "PBT": 535.15,
+    "PAT": 388.14,
+    "unit": "INR crore"
+  },
+  "havells_native_research": {
+    "ai_status": "success",
+    "model": "gemini-3.5-flash-lite",
+    "source_references": 8,
+    "provider_usage": {
+      "input_tokens": 15279,
+      "output_tokens": 1165
+    },
+    "summary": "Standalone EBITDA for Q2 FY27 was reported at Rs 576 crores, representing a 30.5% growth YoY compared to Rs 442 crores in Q2 FY26."
+  },
+  "authentic_push": [
+    {
+      "id": "84aa6b921c367962be57e292",
+      "date": "2026-11-02",
+      "precision": "date",
+      "category": "M&A",
+      "source": "https://itcportal.com/content/dam/itc-corporate/stock-exchange-/2026/lodr-02nov26b.pdf",
+      "page": 3
+    },
+    {
+      "id": "0b1baa0234dcc6bbc1ce2c2b",
+      "date": "2026-11-02",
+      "precision": "date",
+      "category": "results",
+      "source": "https://itcportal.com/content/dam/itc-corporate/stock-exchange-/2026/lodr-02nov26a.pdf",
+      "page": 10
+    }
+  ],
+  "additional_browser_provider_case": {
+    "ticker": "AJANTPHARM.NS",
+    "ai_status": "invalid_schema_or_company",
+    "fallback": "verified deterministic calculations and primary-source citations",
+    "html_pdf_page_fragments": 0
+  }
+}

@@ -41,6 +41,7 @@ export const documents = sqliteTable(
     hash: text("hash").notNull(),
     mode: text("mode").notNull(),
     publisher: text("publisher"),
+    source_format: text("source_format").notNull().default("pdf"),
     extraction_status: text("extraction_status")
       .notNull()
       .default(sql`'complete'`),
@@ -102,6 +103,13 @@ export const prices = sqliteTable(
         onDelete: "restrict",
       }),
     date: text("date").notNull(),
+    open: real("open"),
+    high: real("high"),
+    low: real("low"),
+    provider: text("provider").notNull().default("unknown"),
+    completion_status: text("completion_status")
+      .notNull()
+      .default("legacy_observation"),
     close: real("close").notNull(),
     adjusted_close: real("adjusted_close").notNull(),
     volume: real("volume").notNull(),
@@ -122,6 +130,13 @@ export const unadjustedPrices = sqliteTable(
       .notNull()
       .references(() => companies.ticker, { onDelete: "restrict" }),
     date: text("date").notNull(),
+    open: real("open"),
+    high: real("high"),
+    low: real("low"),
+    provider: text("provider").notNull().default("unknown"),
+    completion_status: text("completion_status")
+      .notNull()
+      .default("legacy_observation"),
     close: real("close").notNull(),
     volume: real("volume").notNull(),
     source: text("source").notNull(),
@@ -217,6 +232,15 @@ export const metrics = sqliteTable(
     page: integer("page").notNull(),
     currency: text("currency"),
     scale: text("scale"),
+    original_value: real("original_value"),
+    original_unit: text("original_unit"),
+    original_currency: text("original_currency"),
+    original_scale: text("original_scale"),
+    normalized_value: real("normalized_value"),
+    normalized_unit: text("normalized_unit"),
+    evidence_location: text("evidence_location"),
+    period_kind: text("period_kind"),
+    extraction_context: text("extraction_context"),
     fiscal_year: integer("fiscal_year"),
     fiscal_quarter: integer("fiscal_quarter"),
     period_start: text("period_start"),
@@ -518,6 +542,8 @@ export const documentJobs = sqliteTable(
     attempts: integer("attempts").notNull().default(0),
     next_retry: text("next_retry"),
     error: text("error"),
+    error_code: text("error_code"),
+    failed_stage: text("failed_stage"),
     extraction_status: text("extraction_status"),
     extraction_result: text("extraction_result"),
     document_id: text("document_id").references(() => documents.id),
@@ -632,4 +658,30 @@ export const metricDerivations = sqliteTable(
       t.base_metric_id,
     ),
   ],
+);
+
+export const sourcePayloads = sqliteTable("source_payloads", {
+  document_id: text("document_id")
+    .primaryKey()
+    .references(() => documents.id, { onDelete: "restrict" }),
+  format: text("format").notNull(),
+  raw: text("raw").notNull(),
+  payload: text("payload").notNull(),
+  version: text("version").notNull(),
+});
+export const metricProcessing = sqliteTable(
+  "metric_processing",
+  {
+    document_id: text("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "restrict" }),
+    name: text("name").notNull(),
+    period: text("period").notNull().default("unknown"),
+    basis: text("basis").notNull().default(""),
+    state: text("state").notNull(),
+    error_code: text("error_code"),
+    detail: text("detail"),
+    updated_at: text("updated_at").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.document_id, t.name, t.period, t.basis] })],
 );

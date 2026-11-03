@@ -24,6 +24,18 @@ export const sortPeriods = (periods: string[]) =>
         fiscalPeriod(b)!.ordinal - fiscalPeriod(a)!.ordinal ||
         a.localeCompare(b),
     );
+export function latestFinancialPeriod(periods: string[]) {
+  const available = sortPeriods(periods),
+    first = available[0];
+  if (!first) return undefined;
+  return (
+    available.find(
+      (p) =>
+        p.startsWith("Q") &&
+        fiscalPeriod(p)?.ordinal === fiscalPeriod(first)?.ordinal,
+    ) ?? first
+  );
+}
 export function comparisonPeriods(rows: Metric[], requested?: string) {
   const available = sortPeriods(
     rows
@@ -44,13 +56,31 @@ export function comparisonPeriods(rows: Metric[], requested?: string) {
       ]
     : [current!, `FY${p.year - 1}`];
 }
+/** Only equivalent scope/reported-currency spellings are normalised. Explicit
+ * standards, adjusted definitions and constant-currency bases remain distinct. */
+export function metricBasis(metric: Metric) {
+  const b = metric.basis
+    .toLowerCase()
+    .replace(/[,;()]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const currency =
+    metric.currency ??
+    metric.unit
+      .match(/^(INR|USD|EUR|GBP|JPY|AED|CNY|CHF|AUD|CAD)/i)?.[1]
+      ?.toUpperCase();
+  const simple = b.match(
+    /^(consolidated|standalone)(?: reported)?(?: (?:currency|inr|usd|eur|gbp|jpy|aed|cny|chf|aud|cad))?$/,
+  );
+  return simple && currency ? `${simple[1]} reported ${currency}` : b;
+}
 export const compatibleMetrics = (
   a: Metric | undefined,
   b: Metric | undefined,
 ) =>
   !!a &&
   !!b &&
-  a.basis === b.basis &&
+  metricBasis(a) === metricBasis(b) &&
   a.unit === b.unit &&
   a.ticker === b.ticker &&
   (a.currency ?? a.unit.match(/^(INR|USD)/)?.[0]) ===
@@ -86,11 +116,21 @@ export function selectMetric(
       .at(-1);
     candidates = restated.filter((m) => (m.published_at ?? "") === latest);
   }
+  // Exact structured statement contexts outrank rounded summary prose. Equally authoritative
+  // structured conflicts remain unavailable; timestamps alone never establish a restatement.
+  const rank = (m: Metric) =>
+    m.verification_status === "structured_verified"
+      ? 3
+      : m.verification_status === "statement_verified"
+        ? 2
+        : 1;
+  const authority = Math.max(0, ...candidates.map(rank));
+  candidates = candidates.filter((m) => rank(m) === authority);
   const facts = new Set(
     candidates.map((m) =>
       JSON.stringify([
         m.value,
-        m.basis,
+        metricBasis(m),
         m.unit,
         m.currency ?? m.unit.match(/^(INR|USD)/)?.[0] ?? null,
         m.scale ?? m.unit.match(/crore|million|billion|lakh/)?.[0] ?? null,

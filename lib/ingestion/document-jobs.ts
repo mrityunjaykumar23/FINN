@@ -1,3 +1,8 @@
+import { financialError } from "../financial-errors";
+import {
+  finishMetricExtraction,
+  financialExtractorVersion,
+} from "../financial-store";
 import { extractionOutcome } from "../pipeline-state";
 import {
   all,
@@ -8,7 +13,11 @@ import {
   unlock,
   ApiError,
 } from "../../db/repository";
-import { PDF_LAYOUT_VERSION } from "../pdf-financials";
+import {
+  PDF_LAYOUT_VERSION,
+  financialHeaderDate,
+  type PdfLayout,
+} from "../pdf-financials";
 import { ingestPdf, safeSourceUrl } from "../server";
 import { extractDocument } from "../ai/service";
 export async function enqueueDocument(
@@ -52,21 +61,43 @@ export async function upgradeDocumentLayout(ticker: string, jobId: string) {
   if (!j?.document_id || ["running", "extracting"].includes(j.status)) return;
   const version = await one<{ value: string }>(
     "SELECT value FROM meta WHERE key=?",
-    `layout-checked:${j.document_id}`,
+    `financial-checked:${j.document_id}`,
   );
   if (
-    version?.value === PDF_LAYOUT_VERSION ||
+    version?.value === financialExtractorVersion ||
     !(await lock(`layout-upgrade:${j.document_id}`, 90000))
   )
     return;
   try {
-    const id = await ingestPdf(
-      ticker,
-      j.url,
-      j.title,
-      j.official_host ?? undefined,
-      { background: true },
+    const stored = await all<{ payload: string; version: string }>(
+      "SELECT payload,version FROM document_layouts WHERE document_id=?",
+      j.document_id,
     );
+    const needsOrientation = stored.some((row) => {
+      if (row.version === PDF_LAYOUT_VERSION) return false;
+      const p = JSON.parse(row.payload) as PdfLayout,
+        dates = p.items.filter((i) => financialHeaderDate(i.text));
+      return (
+        dates.length >= 3 &&
+        Math.max(...dates.map((i) => i.x)) -
+          Math.min(...dates.map((i) => i.x)) <
+          20 &&
+        Math.max(...dates.map((i) => i.y)) -
+          Math.min(...dates.map((i) => i.y)) >
+          40
+      );
+    });
+    const cached =
+      !!(await one(
+        "SELECT document_id FROM source_payloads WHERE document_id=?",
+        j.document_id,
+      )) ||
+      (stored.length > 0 && !needsOrientation);
+    const id = cached
+      ? j.document_id
+      : await ingestPdf(ticker, j.url, j.title, j.official_host ?? undefined, {
+          background: true,
+        });
     const result = await extractDocument(ticker, id, {
       preferDeterministic: true,
       deterministicOnly: true,
@@ -85,6 +116,11 @@ export async function upgradeDocumentLayout(ticker: string, jobId: string) {
         result,
       }),
       new Date().toISOString(),
+    );
+    await run(
+      "INSERT OR REPLACE INTO meta(key,value) VALUES (?,?)",
+      `layout-checked:${id}`,
+      PDF_LAYOUT_VERSION,
     );
     const accepted = Number(result.metrics) > 0 || Number(result.guidance) > 0;
     if (accepted)
@@ -149,6 +185,8 @@ export async function processDocumentJobs(
       expired,
     );
     if (!claimed) continue;
+    let stage = "download",
+      indexedId = j.document_id;
     try {
       const known = j.document_id
         ? await one<{ id: string }>(
@@ -156,7 +194,11 @@ export async function processDocumentJobs(
             j.document_id,
             j.ticker,
           )
-        : null;
+        : await one<{ id: string }>(
+            "SELECT id FROM documents WHERE ticker=? AND url=? AND extraction_status='complete'",
+            j.ticker,
+            j.url,
+          );
       const id =
         known?.id ??
         (await ingestPdf(
@@ -164,8 +206,15 @@ export async function processDocumentJobs(
           j.url,
           j.title,
           j.official_host ?? undefined,
-          { background: true },
+          {
+            background: true,
+            onStage: (value) => {
+              stage = value;
+            },
+          },
         ));
+      indexedId = id;
+      stage = "indexing";
       await run(
         "UPDATE documents SET type=? WHERE id=? AND ticker=?",
         j.type,
@@ -198,13 +247,18 @@ export async function processDocumentJobs(
         });
         continue;
       }
+      stage = "extraction";
       const extraction = await extractDocument(j.ticker, id, {
         preferDeterministic: options.preferDeterministic,
-      }).catch(() => ({
+      }).catch((error) => ({
         status: "extraction_failed",
-        error_code: "extraction_exception",
+        error_code: financialError(error, "extraction").code,
       }));
       const outcome = extractionOutcome(extraction, j.type, j.attempts + 1);
+      const failure = outcome.error
+        ? financialError({ message: outcome.error }, "extraction")
+        : null;
+      await finishMetricExtraction(id, failure?.code);
       await run(
         "UPDATE document_jobs SET status=?,extraction_status=?,extraction_result=?,error=?,next_retry=?,updated_at=? WHERE id=?",
         outcome.status,
@@ -217,6 +271,12 @@ export async function processDocumentJobs(
         new Date().toISOString(),
         j.id,
       );
+      await run(
+        "UPDATE document_jobs SET error_code=?,failed_stage=? WHERE id=?",
+        failure?.code ?? null,
+        failure ? "extraction" : null,
+        j.id,
+      );
       results.push({
         id: j.id,
         status: outcome.status,
@@ -225,10 +285,10 @@ export async function processDocumentJobs(
         error: outcome.error,
       });
     } catch (e) {
-      const error =
-        e instanceof Error
-          ? e.message.slice(0, 600)
-          : "Original document processing failed";
+      const failure = financialError(e, stage),
+        error = failure.message;
+      if (indexedId && stage === "extraction")
+        await finishMetricExtraction(indexedId, failure.code);
       const status =
         j.attempts >= 2 ||
         /exceeds|source_not_allowed|matching company|Scanned|valid PDF/i.test(
@@ -246,7 +306,19 @@ export async function processDocumentJobs(
         new Date().toISOString(),
         j.id,
       );
-      results.push({ id: j.id, status, error });
+      await run(
+        "UPDATE document_jobs SET error_code=?,failed_stage=? WHERE id=?",
+        failure.code,
+        stage,
+        j.id,
+      );
+      results.push({
+        id: j.id,
+        status,
+        error,
+        error_code: failure.code,
+        failed_stage: stage,
+      });
     }
   }
   return {

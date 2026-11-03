@@ -1,0 +1,38 @@
+
+> finn-investment-intelligence@0.1.0 db:generate
+> drizzle-kit generate
+
+No config path provided, using default 'drizzle.config.ts'
+Reading config file 'C:\Users\mrity\Downloads\Enam_holding\finn\drizzle.config.ts'
+29 tables
+ai_operations 11 columns 0 indexes 0 fks
+alerts 16 columns 1 indexes 3 fks
+announcements 25 columns 6 indexes 1 fks
+analysis_cache 10 columns 2 indexes 0 fks
+document_chunks 5 columns 1 indexes 1 fks
+companies 5 columns 0 indexes 0 fks
+company_versions 2 columns 0 indexes 1 fks
+discovery_candidates 21 columns 3 indexes 2 fks
+document_jobs 17 columns 2 indexes 2 fks
+document_layouts 4 columns 0 indexes 1 fks
+documents 16 columns 3 indexes 1 fks
+extraction_audit 6 columns 0 indexes 1 fks
+guidance_comparisons 7 columns 1 indexes 2 fks
+guidance_statements 18 columns 2 indexes 2 fks
+ingestion_runs 11 columns 1 indexes 1 fks
+job_locks 2 columns 0 indexes 0 fks
+meta 2 columns 0 indexes 0 fks
+metric_derivations 9 columns 1 indexes 3 fks
+metric_processing 8 columns 0 indexes 1 fks
+financial_metrics 31 columns 2 indexes 1 fks
+owners 3 columns 0 indexes 0 fks
+portfolio_companies 3 columns 0 indexes 2 fks
+alert_preferences 2 columns 0 indexes 1 fks
+daily_prices 13 columns 1 indexes 1 fks
+request_budgets 3 columns 0 indexes 0 fks
+research_jobs 15 columns 1 indexes 3 fks
+source_payloads 5 columns 0 indexes 1 fks
+source_sync 16 columns 0 indexes 1 fks
+unadjusted_daily_prices 12 columns 0 indexes 1 fks
+
+No schema changes, nothing to migrate 😴

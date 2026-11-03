@@ -118,3 +118,17 @@ Browser QA covers the default briefing, 7-day window, evidence drawer, source-pa
 The optional external LLM integration has **not** been exercised with a provider key. All demonstrated research ran without one. Production deployment succeeded, public access was verified in the browser, and the entire nine-test HTTP suite passed against the public URL. The source repository is published publicly at [mrityunjaykumar23/FINN](https://github.com/mrityunjaykumar23/FINN).
 
 COFORGE primary source retrieved during the live test: https://www.bseindia.com/xml-data/corpfiling/AttachHis/4a9f4e43-9ca2-4956-8d5f-053e45e7a0ef.pdf . The interactive source period is labelled “Period not verified” until reviewed. Source availability can change, and this single successful test is not a guarantee for every NSE ticker.
+
+## 3 November 2026 — complete end-to-end upgrade
+
+The current readiness result is [FINAL_END_TO_END_AUDIT.md](FINAL_END_TO_END_AUDIT.md). It supersedes earlier counts/provider failures for the workflows retested there; historical audit records remain for traceability.
+
+- **136 named tests passed**, zero failed/skipped: 108 unit/database, 17 API, four reliability API, three real Gemini, and four individual research-job/ingestion/cache/demo suites.
+- TypeScript, warning-free ESLint, production build, independent Python financial validations and JPL/Infosys/Dabur latest-data acceptance passed.
+- Fresh automatic Ajanta discovery produced all four current headline metrics without manual source import. Authentic NSE HTML separately supplied exact lakh facts and reporting contexts.
+- Current Havells PULL returned a real Gemini answer with eight checked primary citations. Fresh ITC PUSH reached original evidence, personalized briefing and persistent alerts.
+- Migration 0012 preserved every original value/count across 29 populated tables. Fresh migrations, atomic failure rollback/retry and actual restart durability passed.
+- Mobile navigation, basis switching and details were checked; 320/375/1440 viewports showed no horizontal document overflow. Native Gemini research rendered in the browser.
+- `.dev.vars` remains preserved/ignored. No push, deployment or hosted schedule activation occurred. The final build runs at [localhost](http://127.0.0.1:5173/) for review.
+
+Evidence: [test summary](test-results/end-to-end/acceptance-summary.json), [migration preservation](test-results/end-to-end/migration-preservation.json), [failure recovery](test-results/end-to-end/failure-recovery.json), [actual restart](test-results/end-to-end/restart-persistence.json), and [browser screenshots](screenshots/end-to-end).

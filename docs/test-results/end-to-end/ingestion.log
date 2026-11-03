@@ -1,0 +1,13 @@
+
+> finn-investment-intelligence@0.1.0 test:ingestion
+> node --test tests/ingestion.integration.test.mjs
+
+✔ simultaneous authentic filing imports create one source-page event (1196.6128ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1336.4277

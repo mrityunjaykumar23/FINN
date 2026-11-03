@@ -1,0 +1,13 @@
+
+> finn-investment-intelligence@0.1.0 test:cache
+> node --test tests/cache.integration.test.mjs
+
+✔ real HTTP answer cache invalidates after newly imported HCL guidance and survives unrelated Infosys ingestion (48009.6939ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 48109.5904

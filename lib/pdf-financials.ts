@@ -1,3 +1,7 @@
+import { monetaryMetric } from "./financial-definitions.ts";
+import { financialMetricName } from "./financial-definitions.ts";
+import { financialUnit, normalizeFinancialValue } from "./financial-units.ts";
+import type { FinancialContext } from "./financial-context.ts";
 import type { ExtractedMetric } from "./financial-extraction.ts";
 export type PdfItem = {
   text: string;
@@ -7,7 +11,7 @@ export type PdfItem = {
   height?: number;
 };
 export type PdfLayout = { page: number; text: string; items: PdfItem[] };
-export const PDF_LAYOUT_VERSION = "pdf_layout_v3";
+export const PDF_LAYOUT_VERSION = "pdf_layout_v7";
 const compact = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 const months = [
   "jan",
@@ -77,12 +81,13 @@ function rows(items: PdfItem[]) {
 }
 function metricName(label: string) {
   const s = label
-    .replace(/^\s*(?:[IVX]+|\d+)[.)]?\s+/i, "")
+    .replace(/^\s*(?:[IVX]+|\d+|[a-z])[.)]?\s+/i, "")
     .replace(/[¹²³*]/g, "")
     .replace(/\s+\d+\.\d+$/, "")
+    .replace(/\s*\((?:RO|NR)\)$/i, "")
     .trim();
   if (
-    /^(?:revenue from operations|operating revenue|revenue|sales)(?:\s*\([\d+ -]+\))?$/i.test(
+    /^(?:revenue from operations|operating revenue|net revenue|revenue|sales)(?:\s*\([\d+ -]+\))?$/i.test(
       s,
     )
   )
@@ -99,12 +104,19 @@ function metricName(label: string) {
     /^PAT$/i.test(s)
   )
     return { name: "PAT", score: 3 };
-  return null;
+  if (/^Net profit$/i.test(s)) return { name: "PAT", score: 3 };
+  const additional = financialMetricName(s);
+  return additional ? { name: additional, score: 1 } : null;
 }
 export function extractPdfFinancials(
   layouts: PdfLayout[],
   company: { ticker: string; name: string },
-  verified?: { yearEndMonth?: number; currency?: string; source?: string },
+  verified?: {
+    yearEndMonth?: number;
+    currency?: string;
+    source?: string;
+    sectionContexts?: Record<number, FinancialContext>;
+  },
 ) {
   const metrics: ExtractedMetric[] = [];
   const reviews: { page: number; reason: string }[] = [];
@@ -117,6 +129,26 @@ export function extractPdfFinancials(
     for (const h of p.items.filter((i) =>
       /^Year\s*ended$/i.test(i.text.trim()),
     )) {
+      const explicitDates = p.items
+        .filter(
+          (i) =>
+            i.y < h.y &&
+            i.y > h.y - 65 &&
+            Math.abs(i.x + i.width / 2 - h.x - h.width / 2) < 50,
+        )
+        .map((i) => ({ i, d: financialHeaderDate(i.text) }))
+        .filter((v) => v.d);
+      if (
+        explicitDates.length &&
+        new Set(explicitDates.map((v) => v.d!.month)).size === 1
+      ) {
+        calendar = {
+          month: explicitDates[0].d!.month,
+          page: p.page,
+          evidence: `${h.text}: ${explicitDates[0].i.text}`,
+        };
+        continue;
+      }
       const year = p.items
         .filter(
           (i) => /^20\d{2}$/.test(i.text.trim()) && i.y < h.y && i.y > h.y - 45,
@@ -149,8 +181,9 @@ export function extractPdfFinancials(
       symbol = compact(company.ticker.replace(/\.NS$/, ""));
     const quarterHeaders = lines.filter(
       (r) =>
-        r.items.filter((i) => /Q[1-4]\s*FY\s*['’]?\d{2,4}/i.test(i.text))
-          .length >= 2,
+        r.items.filter((i) =>
+          /(?:Q[1-4]|H[12])\s*FY\s*['’]?\d{2,4}/i.test(i.text),
+        ).length >= 2,
     );
     const dateHeaders = lines.filter(
       (r) => r.items.filter((i) => financialHeaderDate(i.text)).length >= 2,
@@ -215,13 +248,22 @@ export function extractPdfFinancials(
       .filter((i) => i.y >= header.y - 2)
       .map((i) => i.text)
       .join(" ");
+    const inherited = verified?.sectionContexts?.[page.page];
     if (
+      !inherited &&
       !(target.length >= 5 && compact(top).includes(target)) &&
-      !(symbol.length >= 4 && compact(top).includes(symbol))
+      !(symbol.length >= 4 && compact(top).includes(symbol)) &&
+      !inherited
     )
       continue;
-    const consolidated = /\bconsolidated\b/i.test(top),
-      standalone = /\bstandalone\b/i.test(top);
+    const explicitConsolidated = /\bconsolidated\b/i.test(top),
+      explicitStandalone = /\bstandalone\b/i.test(top);
+    const consolidated =
+        explicitConsolidated ||
+        (!explicitStandalone && inherited?.basis === "Consolidated"),
+      standalone =
+        explicitStandalone ||
+        (!explicitConsolidated && inherited?.basis === "Standalone");
     if (consolidated === standalone) {
       reviews.push({
         page: page.page,
@@ -229,10 +271,29 @@ export function extractPdfFinancials(
       });
       continue;
     }
-    const basis = `${consolidated ? "Consolidated" : "Standalone"} reported INR`;
-    const currency = /(?:₹|INR|Rs\.?|Rupees).{0,12}crores?/i.test(page.text)
-      ? "INR"
-      : verified?.currency;
+    const caption = page.items
+      .filter((i) => i.y >= header.y - 3 && i.y <= header.y + 100)
+      .map((i) => i.text)
+      .join(" ");
+    // Some embedded PDF fonts map a closing parenthesis to a trailing lower-case l.
+    const captionUnit = (s: string) =>
+      financialUnit(s.replace(/\b(crores?|lakhs?)l\b/gi, "$1"));
+    let unit = captionUnit(caption);
+    if (!unit) {
+      const captions = lines
+        .filter(
+          (r) =>
+            r.text.length < 120 &&
+            /crores?|\bcrs?\b|lakhs?|lacs?|millions?|billions?/i.test(r.text),
+        )
+        .map((r) => captionUnit(r.text))
+        .filter((u) => u !== null);
+      if (new Set(captions.map((u) => u.unit)).size === 1)
+        unit = captions[0] ?? null;
+    }
+    if (!unit && verified?.currency && /crores?/i.test(page.text))
+      unit = financialUnit(`${verified.currency} crore`);
+    const basis = `${consolidated ? "Consolidated" : "Standalone"} reported ${unit?.currency ?? "unresolved"}`;
     let columns: { x: number; period: string | null; raw: string }[] = [];
     if (quarterHeaders.length) {
       columns = header.items.flatMap<{
@@ -240,21 +301,23 @@ export function extractPdfFinancials(
         period: string | null;
         raw: string;
       }>((i) => {
-        const q = i.text.match(/Q([1-4])\s*FY\s*['’]?(\d{2,4})/i);
+        const q = i.text.match(/((?:Q[1-4]|H[12]))\s*FY\s*['’]?(\d{2,4})/i);
         return q
           ? [
               {
                 x: i.x + i.width / 2,
-                period: `Q${q[1]} FY${fy(q[2])}`,
+                period: `${q[1]} FY${fy(q[2])}`,
                 raw: i.text,
               },
             ]
-          : /YoY|Change/i.test(i.text)
+          : /YoY|Change|%\s*(?:to|growth)/i.test(i.text)
             ? [{ x: i.x + i.width / 2, period: null, raw: i.text }]
             : [];
       });
       for (const i of page.items.filter(
-        (i) => Math.abs(i.y - header.y) < 24 && /YoY|Change/i.test(i.text),
+        (i) =>
+          Math.abs(i.y - header.y) < 24 &&
+          /YoY|Change|%\s*(?:to|growth)/i.test(i.text),
       )) {
         const x = i.x + i.width / 2;
         if (!columns.some((c) => Math.abs(c.x - x) < 20))
@@ -368,11 +431,7 @@ export function extractPdfFinancials(
       }));
     }
     for (const c of columns) if (c.period) periods.add(c.period);
-    if (
-      currency !== "INR" ||
-      !/crores?/i.test(page.text) ||
-      /\b(?:USD|US\$)\b.{0,12}crore/i.test(page.text)
-    ) {
+    if (!unit) {
       reviews.push({
         page: page.page,
         reason:
@@ -390,7 +449,8 @@ export function extractPdfFinancials(
         .map((i) => i.text)
         .join(" ");
       const named = metricName(label);
-      if (!named) continue;
+      if (!named || (!monetaryMetric(named.name) && !/EPS/.test(named.name)))
+        continue;
       const dataLine =
         lines
           .filter(
@@ -438,13 +498,49 @@ export function extractPdfFinancials(
           score: named.score,
           m: {
             name: named.name,
-            value,
+            value: normalizeFinancialValue(
+              value,
+              /EPS/.test(named.name)
+                ? financialUnit(`${unit.currency}/share`, true)!
+                : unit,
+            ),
+            original_value: value,
+            original_unit: /EPS/.test(named.name)
+              ? `${unit.currency}/share`
+              : unit.unit,
+            original_currency: unit.currency,
+            original_scale: /EPS/.test(named.name) ? "per_share" : unit.scale,
+            normalized_value: normalizeFinancialValue(
+              value,
+              /EPS/.test(named.name)
+                ? financialUnit(`${unit.currency}/share`, true)!
+                : unit,
+            ),
+            normalized_unit: /EPS/.test(named.name)
+              ? `${unit.currency}/share`
+              : unit.normalized_unit,
+            currency: unit.currency,
+            scale: /EPS/.test(named.name)
+              ? "per_share"
+              : unit.normalized_unit.split(" ")[1],
+            evidence_location: `PDF page ${page.page}; column ${col.raw}; row ${label}`,
+            period_kind: "duration",
+            extraction_context: JSON.stringify({
+              scope_source: inherited ?? null,
+              period_column: col.raw,
+              unit_caption: caption,
+            }),
             period: col.period,
-            unit: "INR crore",
+            unit: /EPS/.test(named.name)
+              ? `${unit.currency}/share`
+              : unit.normalized_unit,
             basis,
             page: page.page,
             evidence_text: page.text,
-            verification_status: "source_checked",
+            verification_status:
+              /statement of[\s\S]{0,70}financial results/i.test(top)
+                ? "statement_verified"
+                : "source_checked",
             extraction_method: PDF_LAYOUT_VERSION,
             reporting_status: "reported",
           },
@@ -531,6 +627,15 @@ export async function captureFinancialLayouts(
   for (const p of indices) {
     const page = await pdf.getPage(p.i + 1),
       content = await page.getTextContent();
+    const transforms = content.items
+      .map((v) => (v as { transform?: number[] }).transform)
+      .filter((t) => t && Math.abs(t[1]) > Math.abs(t[0]) * 4);
+    const direction =
+      transforms.length > content.items.length * 0.6
+        ? transforms[0]![1] < 0
+          ? -90
+          : 90
+        : 0;
     const items: PdfItem[] = [];
     for (const value of content.items) {
       const i = value as {
@@ -546,8 +651,18 @@ export async function captureFinancialLayouts(
       )
         items.push({
           text: i.str,
-          x: i.transform[4],
-          y: i.transform[5],
+          x:
+            direction === -90
+              ? -i.transform[5]
+              : direction === 90
+                ? i.transform[5]
+                : i.transform[4],
+          y:
+            direction === -90
+              ? i.transform[4]
+              : direction === 90
+                ? -i.transform[4]
+                : i.transform[5],
           width: i.width,
           height: i.height,
         });

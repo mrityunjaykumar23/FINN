@@ -4,6 +4,8 @@ export type BriefingFilters = {
   mode: string;
   start: string;
   end: string;
+  since?: string;
+  until?: string;
   ticker?: string;
   category?: string;
   priority?: number;
@@ -17,6 +19,7 @@ export function briefingPlan(
   section: "events" | "routine" = "events",
 ) {
   const where = [
+      "a.verification_status<>'review_required'",
       "p.owner=?",
       "a.ingestion_mode=?",
       "a.date>=?",
@@ -24,6 +27,14 @@ export function briefingPlan(
       "json_extract(a.payload,'$.canonical_event_id') IS NULL",
     ],
     values: (string | number)[] = [f.owner, f.mode, f.start, f.end];
+  if (f.since && f.until) {
+    // Date-only disclosures retain calendar-date precision. A known offset
+    // timestamp is compared as an instant, never fabricated from midnight.
+    where.push(
+      "(coalesce(json_extract(a.payload,'$.publication_precision'),'date') NOT IN ('exchange_datetime','company_recorded_datetime') OR json_extract(a.payload,'$.published_at') IS NULL OR julianday(json_extract(a.payload,'$.published_at')) BETWEEN julianday(?) AND julianday(?))",
+    );
+    values.push(f.since, f.until);
+  }
   if (f.ticker) {
     where.push("a.ticker=?");
     values.push(f.ticker);

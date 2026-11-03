@@ -1,0 +1,3 @@
+(node:24508) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+FAILURE RECOVERY PASS {"atomic_persistence_rollback":true,"prior_verified_facts_preserved":34,"successful_recovery":true,"retry_without_redownload":true,"duplicate_facts_created":0,"broken_source_stage":"download","broken_source_error":"source_unavailable","retry_cooldown_respected":true,"integrity":"ok","foreign_key_errors":0}

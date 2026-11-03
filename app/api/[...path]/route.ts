@@ -1,3 +1,9 @@
+import {
+  createMonitor,
+  monitorState,
+  claimMonitor,
+  runMonitor,
+} from "@/lib/monitor-jobs";
 import { scheduledStep } from "@/lib/scheduled-jobs";
 import {
   queueMarketRefresh,
@@ -91,7 +97,7 @@ const questionSchema = z.object({
   question: z.string().trim().min(3).max(800),
   period: z
     .string()
-    .regex(/^(?:Q[1-4]\s+)?FY\d{4}$/)
+    .regex(/^(?:(?:Q[1-4]|H[12])\s+)?FY\d{4}$/)
     .optional(),
   type: z.enum(["annual_report", "transcript", "results"]).optional(),
 });
@@ -170,7 +176,7 @@ async function handle(request: Request) {
     owner = await ownerFor(request);
     await ensureOwner(owner);
     const mode =
-      url.searchParams.get("mode") === "live" ? "live" : "historical";
+      url.searchParams.get("mode") === "historical" ? "historical" : "live";
     if (
       method === "POST" &&
       [
@@ -192,14 +198,29 @@ async function handle(request: Request) {
       result = {
         status: "ok",
         database: "SQLite / D1",
-        snapshot: "2025-04-22",
+        historical_snapshot: "2025-04-22",
+        default_mode: "live",
         market: "end-of-day",
         research: "primary-source retrieval",
         llm_configured: providerStatus().enabled,
       };
     else if (path === "status" && method === "GET")
       result = await systemStatus(owner);
-    else if (path === "portfolio" && method === "GET")
+    else if (path === "portfolio/monitor" && method === "POST")
+      result = await createMonitor(owner);
+    else if (/^portfolio\/monitor\/[a-f0-9]{64}(?:\/advance)?$/.test(path)) {
+      const id = path.split("/")[2];
+      if (method === "POST" && path.endsWith("/advance")) {
+        const job = await claimMonitor(owner, id);
+        if (job) waitUntil(runMonitor(job));
+      } else if (method !== "GET")
+        throw new ApiError(
+          405,
+          "method_not_allowed",
+          "Use GET for monitoring status.",
+        );
+      result = await monitorState(owner, id);
+    } else if (path === "portfolio" && method === "GET")
       result = { companies: await portfolioFor(owner, mode), mode };
     else if (path === "portfolio" && method === "POST") {
       const input = tickerInput.parse(parsedBody),
@@ -488,18 +509,30 @@ async function handle(request: Request) {
           owner,
           ticker,
           url.searchParams.get("period") ?? undefined,
+          url.searchParams.get("basis") ?? undefined,
         );
       else if (method === "POST" && path.endsWith("/advance")) {
         await budget(`snapshot-advance:${owner}`, 120);
         const job = await claimSnapshot(owner, ticker);
         if (job) waitUntil(runSnapshot(job));
-        result = await snapshotState(owner, ticker);
+        result = await snapshotState(
+          owner,
+          ticker,
+          url.searchParams.get("period") ?? undefined,
+          url.searchParams.get("basis") ?? undefined,
+        );
       } else if (method === "POST") {
         await budget(`snapshot-start:${owner}`, 40);
         const input = z
           .object({ force: z.boolean().optional() })
           .parse(parsedBody);
-        result = await createSnapshot(owner, ticker, input.force);
+        await createSnapshot(owner, ticker, input.force);
+        result = await snapshotState(
+          owner,
+          ticker,
+          url.searchParams.get("period") ?? undefined,
+          url.searchParams.get("basis") ?? undefined,
+        );
       } else
         throw new ApiError(
           405,
@@ -567,10 +600,13 @@ async function handle(request: Request) {
         type: input.type,
       });
     } else if (path === "guidance" && method === "GET")
-      result = { comparisons: await guidanceFor() };
+      result = { comparisons: await guidanceFor(undefined, mode) };
     else if (/^research\/[^/]+\/guidance$/.test(path) && method === "GET")
       result = {
-        comparisons: await guidanceFor(normalizeTicker(path.split("/")[1])),
+        comparisons: await guidanceFor(
+          normalizeTicker(path.split("/")[1]),
+          mode,
+        ),
       };
     else if (/^research\/[^/]+\/documents$/.test(path) && method === "GET")
       result = {

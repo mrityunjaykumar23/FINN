@@ -1,0 +1,31 @@
+{
+  "protected_without_credentials": true,
+  "bounded_market_batch": {
+    "results": [
+      {
+        "ticker": "HCLTECH.NS",
+        "queued": [],
+        "pending": 0,
+        "running": 0,
+        "limited": false
+      },
+      {
+        "ticker": "HDFCBANK.NS",
+        "queued": [],
+        "pending": 0,
+        "running": 0,
+        "limited": false
+      },
+      {
+        "ticker": "HINDUNILVR.NS",
+        "queued": [],
+        "pending": 0,
+        "running": 0,
+        "limited": false
+      }
+    ],
+    "next_company_cursor": "HINDUNILVR.NS"
+  },
+  "evaluate_cursor_accepted": true,
+  "cloud_schedule_activated": false
+}

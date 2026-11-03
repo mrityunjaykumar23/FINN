@@ -17,7 +17,11 @@ export async function queueMarketRefresh(tickers: string[], force = false) {
       running++;
       continue;
     }
-    if ((!state.stale && !force) || !state.can_refresh) continue;
+    const latest = points.at(-1),
+      needsOHLC =
+        !!latest &&
+        (latest.open == null || latest.high == null || latest.low == null);
+    if ((!state.stale && !force && !needsOHLC) || !state.can_refresh) continue;
     if (queued.length >= 3) {
       pending++;
       continue;

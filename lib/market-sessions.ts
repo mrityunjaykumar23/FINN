@@ -93,11 +93,16 @@ export function completedSessions(
         p.volume > 0
       );
     })
-    .map(({ date, close, adjusted_close, volume }) => ({
+    .map(({ date, close, adjusted_close, volume, open, high, low }) => ({
       date,
       close,
       adjusted_close,
       volume,
+      open,
+      high,
+      low,
+      provider: "yahoo_finance",
+      completion_status: "verified_completed",
     }))
     .sort((a, b) => a.date.localeCompare(b.date));
   const latest = points.at(-1)?.date ?? null;

@@ -1,0 +1,123 @@
+{
+  "result": "pass",
+  "tables": {
+    "_cf_METADATA": {
+      "count": 1,
+      "original_columns_preserved": true
+    },
+    "ai_operations": {
+      "count": 162,
+      "original_columns_preserved": true
+    },
+    "alert_preferences": {
+      "count": 18,
+      "original_columns_preserved": true
+    },
+    "alerts": {
+      "count": 2739,
+      "original_columns_preserved": true
+    },
+    "analysis_cache": {
+      "count": 133,
+      "original_columns_preserved": true
+    },
+    "announcements": {
+      "count": 26,
+      "original_columns_preserved": true
+    },
+    "companies": {
+      "count": 47,
+      "original_columns_preserved": true
+    },
+    "company_versions": {
+      "count": 35,
+      "original_columns_preserved": true
+    },
+    "d1_migrations": {
+      "count": 12,
+      "original_columns_preserved": true
+    },
+    "daily_prices": {
+      "count": 2501,
+      "original_columns_preserved": true
+    },
+    "discovery_candidates": {
+      "count": 1089,
+      "original_columns_preserved": true
+    },
+    "document_chunks": {
+      "count": 4682,
+      "original_columns_preserved": true
+    },
+    "document_jobs": {
+      "count": 599,
+      "original_columns_preserved": true
+    },
+    "document_layouts": {
+      "count": 108,
+      "original_columns_preserved": true
+    },
+    "documents": {
+      "count": 59,
+      "original_columns_preserved": true
+    },
+    "extraction_audit": {
+      "count": 312,
+      "original_columns_preserved": true
+    },
+    "financial_metrics": {
+      "count": 223,
+      "original_columns_preserved": true
+    },
+    "guidance_comparisons": {
+      "count": 4,
+      "original_columns_preserved": true
+    },
+    "guidance_statements": {
+      "count": 16,
+      "original_columns_preserved": true
+    },
+    "ingestion_runs": {
+      "count": 60,
+      "original_columns_preserved": true
+    },
+    "job_locks": {
+      "count": 0,
+      "original_columns_preserved": true
+    },
+    "meta": {
+      "count": 57,
+      "original_columns_preserved": true
+    },
+    "metric_derivations": {
+      "count": 21,
+      "original_columns_preserved": true
+    },
+    "owners": {
+      "count": 545,
+      "original_columns_preserved": true
+    },
+    "portfolio_companies": {
+      "count": 9402,
+      "original_columns_preserved": true
+    },
+    "request_budgets": {
+      "count": 231,
+      "original_columns_preserved": true
+    },
+    "research_jobs": {
+      "count": 44,
+      "original_columns_preserved": true
+    },
+    "source_sync": {
+      "count": 59,
+      "original_columns_preserved": true
+    },
+    "unadjusted_daily_prices": {
+      "count": 0,
+      "original_columns_preserved": true
+    }
+  },
+  "integrity": "ok",
+  "foreign_key_errors": 0
+}

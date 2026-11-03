@@ -7,7 +7,9 @@ import type {
   Guidance,
 } from "./domain";
 export type Company = {
-  market_freshness?: ReturnType<typeof import("./market-state").marketFreshness>;
+  market_freshness?: ReturnType<
+    typeof import("./market-state").marketFreshness
+  >;
   prior_sessions?: number;
   relative_volume_status?: string;
   ticker: string;
@@ -37,6 +39,7 @@ export type RankedFiling = Filing & {
   metric_source_urls?: Record<string, string>;
 };
 export type Document = {
+  source_format?: string;
   id: string;
   ticker: string;
   title: string;

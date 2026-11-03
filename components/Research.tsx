@@ -1,5 +1,7 @@
 "use client";
 
+import { fiscalPeriod, sortPeriods } from "@/lib/periods";
+
 import type {
   Company,
   Document,
@@ -465,12 +467,12 @@ export function ResearchView({
                             value={period}
                             onChange={(e) => setPeriod(e.target.value)}
                           >
-                            <option value="">All periods</option>
-                            {[
-                              ...new Set(
-                                overview.documents.map((d) => d.period),
-                              ),
-                            ].map((p) => (
+                            <option value="">
+                              Latest relevant verified period
+                            </option>
+                            {sortPeriods(
+                              overview.documents.map((d) => d.period),
+                            ).map((p) => (
                               <option key={p}>{p}</option>
                             ))}
                           </select>
@@ -770,11 +772,14 @@ export function ResearchView({
                   <div className="research-guidance">
                     <Target size={20} />
                     <h3>Did management deliver?</h3>
-                    <p>{overview.guidance[0].explanation}</p>
+                    <p>
+                      {overview.guidance[0].period} · Latest stored comparable
+                      target. {overview.guidance[0].explanation}
+                    </p>
                     <button
                       onClick={() =>
                         void ask(
-                          "Did management deliver on its FY2025 revenue guidance?",
+                          "Did management deliver on its latest comparable revenue guidance?",
                         )
                       }
                       disabled={asking}
@@ -798,35 +803,50 @@ export function ResearchView({
                       {overview.documents.length}
                     </span>
                   </div>
-                  {overview.documents.map((d) => (
-                    <div key={d.id}>
-                      <FileText size={16} />
-                      <div>
-                        <strong>{d.type.replaceAll("_", " ")}</strong>
-                        <span>{d.period}</span>
-                        <span>Indexed {date(d.retrieved_at)}</span>
-                        {d.extraction_status && (
-                          <span>
-                            {d.extraction_status} text indexing ·{" "}
-                            {d.indexed_pages ?? "?"}/{d.total_pages ?? "?"}{" "}
-                            pages · period {d.period_status ?? "unverified"}
-                          </span>
-                        )}
-                        {d.financial_extraction_status && (
-                          <span>
-                            Financial extraction:{" "}
-                            {d.financial_extraction_status.replaceAll("_", " ")}
-                            {d.financial_extraction_error
-                              ? ` · ${d.financial_extraction_error}`
-                              : ""}
-                          </span>
-                        )}
-                        <SourceLink url={d.url}>
-                          Open primary document
-                        </SourceLink>
+                  {[...overview.documents]
+                    .sort(
+                      (a, b) =>
+                        (fiscalPeriod(b.period)?.ordinal ?? 0) -
+                          (fiscalPeriod(a.period)?.ordinal ?? 0) ||
+                        (b.retrieved_at ?? "").localeCompare(
+                          a.retrieved_at ?? "",
+                        ),
+                    )
+                    .map((d) => (
+                      <div key={d.id}>
+                        <FileText size={16} />
+                        <div>
+                          <strong>{d.type.replaceAll("_", " ")}</strong>
+                          <span>{d.period}</span>
+                          <span>Indexed {date(d.retrieved_at)}</span>
+                          {d.extraction_status && (
+                            <span>
+                              {d.extraction_status} text indexing ·{" "}
+                              {d.indexed_pages ?? "?"}/{d.total_pages ?? "?"}{" "}
+                              {d.source_format && d.source_format !== "pdf"
+                                ? "structured sections"
+                                : "pages"}{" "}
+                              · period {d.period_status ?? "unverified"}
+                            </span>
+                          )}
+                          {d.financial_extraction_status && (
+                            <span>
+                              Financial extraction:{" "}
+                              {d.financial_extraction_status.replaceAll(
+                                "_",
+                                " ",
+                              )}
+                              {d.financial_extraction_error
+                                ? ` · ${d.financial_extraction_error}`
+                                : ""}
+                            </span>
+                          )}
+                          <SourceLink url={d.url}>
+                            Open primary document
+                          </SourceLink>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
                   {!overview.documents.length && (
                     <p>
                       No cached documents. Ask a question to initiate
@@ -834,9 +854,9 @@ export function ResearchView({
                     </p>
                   )}
                   <p className="library-note">
-                    PDF page numbers refer to the actual file, including cover
-                    pages. Large annual reports have a bounded selection of
-                    indexed pages.
+                    PDF references use file page numbers, including cover pages.
+                    HTML/XBRL references identify structured sections and source
+                    rows. Large reports may have bounded extraction coverage.
                   </p>
                 </div>
               </aside>

@@ -1,10 +1,13 @@
+import { fiscalPeriod } from "./periods";
+import { sourceHref } from "./source-references";
+import { ingestStructuredSource } from "./ingestion/structured-source";
 import financialSources from "../data/financial-sources.json";
 import {
   PDF_LAYOUT_VERSION,
   captureFinancialLayouts,
   extractPdfFinancials,
 } from "./pdf-financials";
-import { extractionOutcome, publicationMetadata } from "./pipeline-state";
+import { publicationMetadata } from "./pipeline-state";
 import { financialLabelSupported, revenueContext } from "./financial-labels";
 import { automatedEventSupported } from "./event-evidence";
 import { contiguousEvidence } from "./event-analysis";
@@ -35,6 +38,7 @@ import {
   rankCandidates,
   documentType,
   disclosureNotice,
+  DISCOVERY_VERSION,
 } from "./ingestion/discovery";
 import announcementSources from "../data/announcement-sources.json";
 import { inferHeaderPeriod } from "./financial-extraction";
@@ -244,7 +248,7 @@ async function reconcileDocumentKinds() {
   );
 }
 async function reconcileEventEvidence() {
-  if (await one("SELECT value FROM meta WHERE key='event-evidence-review-v1'"))
+  if (await one("SELECT value FROM meta WHERE key='event-evidence-review-v2'"))
     return;
   const rows = await all<{ id: string; document_id: string; payload: string }>(
     "SELECT id,document_id,payload FROM announcements WHERE json_extract(payload,'$.event_quote') IS NOT NULL AND json_extract(payload,'$.canonical_event_id') IS NULL AND verification_status<>'review_required'",
@@ -293,7 +297,7 @@ async function reconcileEventEvidence() {
     ]);
   }
   await run(
-    "INSERT OR IGNORE INTO meta(key,value) VALUES ('event-evidence-review-v1','complete')",
+    "INSERT OR IGNORE INTO meta(key,value) VALUES ('event-evidence-review-v2','complete')",
   );
 }
 let initialization: Promise<void> | null = null;
@@ -566,10 +570,10 @@ export async function getSettings(owner: string): Promise<Settings> {
   return row ? JSON.parse(row.settings) : structuredClone(defaultSettings);
 }
 // Raw-only observations remain distinct; a verified adjusted bar supersedes the same raw session.
-const observedPricesByMode = `(SELECT ticker,date,close,adjusted_close,volume,mode FROM daily_prices UNION ALL SELECT r.ticker,r.date,r.close,NULL AS adjusted_close,r.volume,r.mode FROM unadjusted_daily_prices r WHERE NOT EXISTS (SELECT 1 FROM daily_prices a WHERE a.ticker=r.ticker AND a.date=r.date AND a.mode=r.mode))`;
-export async function getPoints(ticker: string, mode = "historical") {
+const observedPricesByMode = `(SELECT ticker,date,close,adjusted_close,volume,mode,open,high,low,provider,completion_status FROM daily_prices UNION ALL SELECT r.ticker,r.date,r.close,NULL AS adjusted_close,r.volume,r.mode,r.open,r.high,r.low,r.provider,r.completion_status FROM unadjusted_daily_prices r WHERE NOT EXISTS (SELECT 1 FROM daily_prices a WHERE a.ticker=r.ticker AND a.date=r.date AND a.mode=r.mode))`;
+export async function getPoints(ticker: string, mode = "live") {
   return all<Point>(
-    "SELECT date,close,adjusted_close,volume FROM " +
+    "SELECT date,close,adjusted_close,volume,open,high,low,provider,completion_status FROM " +
       observedPricesByMode +
       " WHERE ticker=? AND mode=? AND date>=coalesce((SELECT json_extract(value,'$.date') FROM meta WHERE key='listing:'||?), '0000') ORDER BY date",
     ticker,
@@ -577,7 +581,7 @@ export async function getPoints(ticker: string, mode = "historical") {
     ticker,
   );
 }
-export async function portfolioFor(owner: string, mode = "historical") {
+export async function portfolioFor(owner: string, mode = "live") {
   const [companies, settings, points, counts] = await Promise.all([
     all<Company>(
       "SELECT c.* FROM companies c JOIN portfolio_companies p ON p.ticker=c.ticker WHERE p.owner=? ORDER BY c.name",
@@ -639,6 +643,7 @@ export async function getFilings(
     priority?: number;
   } = {},
 ) {
+  filters = { ...filters, mode: filters.mode ?? "live" };
   const clauses: string[] = [
       "json_extract(payload,'$.canonical_event_id') IS NULL AND verification_status<>'review_required'",
     ],
@@ -792,13 +797,18 @@ export async function eventDetail(
   };
 }
 export async function digest(owner: string, params: URLSearchParams) {
-  const mode = params.get("mode") === "live" ? "live" : "historical";
+  const mode = params.get("mode") === "historical" ? "historical" : "live";
   const end =
     params.get("end") ??
     (mode === "historical" ? seed.as_of : exchangeDate(new Date()));
   const days = Math.min(3650, Math.max(1, Number(params.get("days") ?? 1)));
+  const rolling = mode === "live" && !params.has("start") && !params.has("end");
+  const since = rolling
+    ? new Date(Date.now() - days * 86400000).toISOString()
+    : undefined;
   const start =
     params.get("start") ??
+    (since ? exchangeDate(new Date(since)) : undefined) ??
     new Date(new Date(end + "T00:00:00Z").getTime() - (days - 1) * 86400000)
       .toISOString()
       .slice(0, 10);
@@ -819,6 +829,8 @@ export async function digest(owner: string, params: URLSearchParams) {
     limit: Number(params.get("limit") ?? 30),
     cursor: params.get("cursor") ?? undefined,
     routine_cursor: params.get("routine_cursor") ?? undefined,
+    since,
+    until: rolling ? new Date().toISOString() : undefined,
   };
   let important, low;
   try {
@@ -913,14 +925,28 @@ export async function digest(owner: string, params: URLSearchParams) {
     companies: portfolio.length,
     covered_companies: coverage.successfully_checked_companies,
     unavailable_companies: portfolio.filter((c) => !c.date).length,
+    window_precision: rolling
+      ? "Rolling time window for timestamped filings; date-only disclosures use the intersecting exchange calendar dates."
+      : "Exchange calendar dates",
     source_note:
       mode === "historical"
         ? "Historical replay. Cached official company disclosures; limited filing coverage, not a complete exchange feed. Dates are original event dates. EOD prices are Yahoo Finance observations."
-        : "Live mode never substitutes the historical snapshot. Refresh market data to retrieve recent sessions; exchange ingestion is administrator-controlled.",
+        : "Live mode never substitutes the historical snapshot. Refresh market data to retrieve recent sessions; bounded announcement checks run on opening for accessible original sources. Coverage gaps remain explicit.",
   };
 }
-export async function guidanceFor(ticker?: string) {
-  return guidanceRows(ticker);
+export async function guidanceFor(ticker?: string, mode = "live") {
+  const rows = await guidanceRows(ticker);
+  if (mode === "historical") return rows;
+  return rows.filter(
+    (g) =>
+      !rows.some(
+        (other) =>
+          other.ticker === g.ticker &&
+          other.metric === g.metric &&
+          (fiscalPeriod(other.period)?.ordinal ?? 0) >
+            (fiscalPeriod(g.period)?.ordinal ?? 0),
+      ),
+  );
 }
 export async function research(
   ticker: string,
@@ -988,7 +1014,7 @@ export async function research(
   const requestedPeriod =
     filters.period ??
     question.match(/(?:Q[1-4]\s+)?FY\d{4}/i)?.[0]?.toUpperCase() ??
-    (/latest|most recent/i.test(question)
+    (!filters.period
       ? sortPeriods(
           docs
             .filter(
@@ -1048,6 +1074,7 @@ export async function research(
     url: string;
     period: string;
     type: string;
+    source_format?: string;
   }[] = [];
   try {
     const plan = passageQuery(ticker, question, filters);
@@ -1079,7 +1106,8 @@ export async function research(
     document_id: s.document_id,
     page: s.page,
     title: s.title,
-    url: `${s.url}#page=${s.page}`,
+    url: sourceHref(s.url, s.page, s.source_format),
+    source_format: s.source_format,
     text: s.text,
     period: s.period,
   }));
@@ -1142,7 +1170,12 @@ export async function research(
             document_id: document.id,
             page: location.page,
             title: document.title,
-            url: `${document.url}#page=${location.page}`,
+            url: sourceHref(
+              document.url,
+              location.page,
+              document.source_format,
+            ),
+            source_format: document.source_format,
             text,
             period: document.period,
           };
@@ -1365,6 +1398,11 @@ export async function storeMarket(
       "source",
       "retrieved_at",
       "mode",
+      "open",
+      "high",
+      "low",
+      "provider",
+      "completion_status",
     ],
     result.points
       .filter((p) => p.adjusted_close !== null)
@@ -1377,13 +1415,31 @@ export async function storeMarket(
         result.point_sources?.[p.date] ?? result.source,
         result.retrieved_at,
         "live",
+        p.open ?? null,
+        p.high ?? null,
+        p.low ?? null,
+        "yahoo_finance",
+        "verified_completed",
       ]),
     true,
   );
   statements.push(
     ...insertMany(
       "unadjusted_daily_prices",
-      ["ticker", "date", "close", "volume", "source", "retrieved_at", "mode"],
+      [
+        "ticker",
+        "date",
+        "close",
+        "volume",
+        "source",
+        "retrieved_at",
+        "mode",
+        "open",
+        "high",
+        "low",
+        "provider",
+        "completion_status",
+      ],
       result.points
         .filter((p) => p.adjusted_close === null)
         .map((p) => [
@@ -1394,6 +1450,11 @@ export async function storeMarket(
           result.point_sources?.[p.date] ?? result.source,
           result.retrieved_at,
           "live",
+          p.open ?? null,
+          p.high ?? null,
+          p.low ?? null,
+          "yahoo_finance",
+          "verified_completed",
         ]),
       true,
     ),
@@ -1500,7 +1561,34 @@ async function discoverDocumentsWork(
   },
 ) {
   const limitations: string[] = [];
-  const { candidates } = await locatePrimaryCandidates(ticker, safeSourceUrl);
+  const cachedCatalogue = await one<{ value: string }>(
+    "SELECT value FROM meta WHERE key=?",
+    `source-catalogue:${ticker}`,
+  );
+  const cached = (
+    cachedCatalogue ? JSON.parse(cachedCatalogue.value) : null
+  ) as {
+    at: string;
+    version?: string;
+    result: Awaited<ReturnType<typeof locatePrimaryCandidates>>;
+  } | null;
+  const discovered =
+    cached &&
+    cached.version === DISCOVERY_VERSION &&
+    Date.parse(cached.at) > Date.now() - 86400000
+      ? cached.result
+      : await locatePrimaryCandidates(ticker, safeSourceUrl);
+  if (!cached || discovered !== cached.result)
+    await run(
+      "INSERT OR REPLACE INTO meta(key,value) VALUES (?,?)",
+      `source-catalogue:${ticker}`,
+      JSON.stringify({
+        at: new Date().toISOString(),
+        version: DISCOVERY_VERSION,
+        result: discovered,
+      }),
+    );
+  const { candidates } = discovered;
   for (const c of candidates) {
     await run(
       "INSERT INTO discovery_candidates(id,ticker,url,title,type,published_at,period,status,checked_at) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(ticker,url) DO UPDATE SET title=excluded.title,type=excluded.type,checked_at=excluded.checked_at",
@@ -1549,8 +1637,11 @@ async function discoverDocumentsWork(
     );
   // Pending/failed candidates remain resumable; one original is processed per interactive request.
   const pending = [];
+  // Prepare only the best two relevant originals. An indexed current source must not
+  // cause every new question to download progressively older reports.
+  const relevant = ranked.filter((c) => c.type !== "announcement").slice(0, 2);
   const { enqueueDocument } = await import("./ingestion/document-jobs");
-  for (const c of ranked) {
+  for (const c of relevant) {
     const known = await one<{ id: string }>(
       "SELECT id FROM documents WHERE ticker=? AND url=? AND extraction_status='complete'",
       ticker,
@@ -1565,14 +1656,21 @@ async function discoverDocumentsWork(
       );
       continue;
     }
-    const job = await one<{ status: string; next_retry: string | null }>(
-      "SELECT status,next_retry FROM document_jobs WHERE ticker=? AND url=?",
+    const job = await one<{
+      status: string;
+      next_retry: string | null;
+      attempts: number;
+    }>(
+      "SELECT status,next_retry,attempts FROM document_jobs WHERE ticker=? AND url=?",
       ticker,
       c.url,
     );
     if (
       job &&
-      (["complete", "manual_required", "running"].includes(job.status) ||
+      (job.attempts >= 3 ||
+        ["complete", "manual_required", "running", "extracting"].includes(
+          job.status,
+        ) ||
         (job.next_retry && job.next_retry > new Date().toISOString()))
     )
       continue;
@@ -1591,83 +1689,16 @@ async function discoverDocumentsWork(
     };
   let indexedCount = 0,
     failed = 0;
-  // One bounded download during an interactive refresh. Everything else is durably queued.
-  for (const c of pending.slice(0, 1)) {
-    const claimed = await one<{ id: string }>(
-      "UPDATE document_jobs SET status='running',updated_at=? WHERE ticker=? AND url=? AND status='pending' RETURNING id",
-      new Date().toISOString(),
-      ticker,
-      c.url,
-    );
-    if (!claimed) continue;
-    try {
-      const id = await ingestPdf(ticker, c.url, c.title, c.officialHost);
-      await run(
-        "UPDATE documents SET type=?,published_at=coalesce(published_at,?) WHERE id=?",
-        c.type,
-        c.published_at,
-        id,
-      );
-      await run(
-        "UPDATE discovery_candidates SET status='indexed',document_id=?,detail=NULL WHERE ticker=? AND url=?",
-        id,
-        ticker,
-        c.url,
-      );
-      await run(
-        "UPDATE document_jobs SET status='extracting',document_id=?,updated_at=? WHERE ticker=? AND url=?",
-        id,
-        new Date().toISOString(),
-        ticker,
-        c.url,
-      );
-      indexedCount++;
-      const extraction = await extractDocument(ticker, id).catch(() => ({
-        status: "extraction_failed",
-        error_code: "extraction_exception",
-      }));
-      const outcome = extractionOutcome(extraction, c.type);
-      await run(
-        "UPDATE document_jobs SET status=?,extraction_status=?,extraction_result=?,error=?,next_retry=?,updated_at=? WHERE ticker=? AND url=?",
-        outcome.status,
-        extraction.status,
-        JSON.stringify(extraction),
-        outcome.error,
-        outcome.status === "extraction_failed"
-          ? new Date(Date.now() + 5 * 60000).toISOString()
-          : null,
-        new Date().toISOString(),
-        ticker,
-        c.url,
-      );
-      if (outcome.status !== "complete") {
-        failed++;
-        limitations.push(
-          outcome.error ??
-            "Financial extraction requires review; original text is indexed.",
-        );
-      }
-    } catch (e) {
+  const { processDocumentJobs } = await import("./ingestion/document-jobs");
+  for (const candidate of pending.slice(0, 1)) {
+    const processed = await processDocumentJobs(1, ticker, candidate.job_id);
+    const result = processed.results[0];
+    if (result && "document_id" in result && result.document_id) indexedCount++;
+    if (result && result.status !== "complete") {
       failed++;
-      const detail =
-        e instanceof Error
-          ? e.message.slice(0, 500)
-          : "Original document unavailable";
-      await run(
-        "UPDATE discovery_candidates SET status='pending',detail=? WHERE ticker=? AND url=?",
-        detail,
-        ticker,
-        c.url,
-      );
-      await run(
-        "UPDATE document_jobs SET status='pending',next_retry=?,error=?,updated_at=CURRENT_TIMESTAMP WHERE ticker=? AND url=?",
-        new Date(Date.now() + 5 * 60000).toISOString(),
-        detail,
-        ticker,
-        c.url,
-      );
       limitations.push(
-        detail + " Background job retained; no automatic unbounded retry.",
+        result.error ??
+          "Original text retained; financial extraction requires review.",
       );
     }
   }
@@ -1693,7 +1724,7 @@ export async function ingestPdf(
   url: string,
   title: string,
   officialHost?: string,
-  options: { background?: boolean } = {},
+  options: { background?: boolean; onStage?: (stage: string) => void } = {},
 ) {
   if (!officialHost) {
     officialHost = announcementSources.find(
@@ -1790,8 +1821,19 @@ export async function ingestPdf(
     bytes.set(b, offset);
     offset += b.length;
   }
-  if (new TextDecoder().decode(bytes.slice(0, 4)) !== "%PDF")
-    throw new Error("Source did not return a valid PDF");
+  options.onStage?.("indexing");
+  if (new TextDecoder().decode(bytes.slice(0, 4)) !== "%PDF") {
+    if (
+      /html|xml|xbrl/i.test(r.headers.get("content-type") ?? "") ||
+      /\.(?:html?|xml|xbrl)(?:[?#]|$)/i.test(url)
+    )
+      return ingestStructuredSource(ticker, url, title, bytes, chunkPage);
+    throw new ApiError(
+      422,
+      "unsupported_file_format",
+      "Source did not return a valid PDF or supported original financial HTML/XBRL document.",
+    );
+  }
   const hash = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))]
     .map((x) => x.toString(16).padStart(2, "0"))
     .join("");
@@ -1939,10 +1981,12 @@ export async function ingestPdf(
       `fiscal-calendar:${ticker}`,
       JSON.stringify({ ...parsed.calendar, source: url, document_id: id }),
     );
-  const tablePeriod = sortPeriods([
-    ...parsed.metrics.map((m) => m.period),
-    ...parsed.periods,
-  ]).find((p) => p.startsWith("Q"));
+  const tablePeriod =
+    sortPeriods([
+      ...parsed.metrics.map((m) => m.period),
+      ...parsed.periods,
+    ]).find((p) => p.startsWith("Q")) ??
+    sortPeriods([...parsed.metrics.map((m) => m.period), ...parsed.periods])[0];
   if (tablePeriod)
     await run(
       "UPDATE documents SET period=?,period_status='source_table_header' WHERE id=?",

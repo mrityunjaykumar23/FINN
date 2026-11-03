@@ -2,9 +2,16 @@
 
 import { ChevronDown, Info } from "lucide-react";
 import type { Research, ResearchFinding } from "@/lib/types";
-import { quarterlyComparisons } from "@/lib/periods";
+import {
+  quarterlyComparisons,
+  sortPeriods,
+  latestFinancialPeriod,
+  selectMetric,
+  metricBasis,
+} from "@/lib/periods";
 import { financialNumber } from "@/lib/presentation";
 import { date, pct, SourceLink } from "./common";
+import { sourceLocation } from "@/lib/source-references";
 import { FinnAvatar } from "./Brand";
 
 export function ResearchAnswer({
@@ -12,7 +19,7 @@ export function ResearchAnswer({
   documents = [],
 }: {
   answer: Research;
-  documents?: { id: string; url: string }[];
+  documents?: { id: string; url: string; source_format?: string }[];
 }) {
   const groups = [
     { title: "Key findings", items: answer.key_findings },
@@ -23,7 +30,27 @@ export function ResearchAnswer({
     { title: "Positive considerations", items: answer.positive_factors ?? [] },
     { title: "Risks to investigate", items: answer.risks ?? [] },
   ];
-  const comparisons = quarterlyComparisons(answer.metrics).filter(
+  const requested = answer.question
+    .match(/(?:(?:Q[1-4]|H[12])\s+)?FY\s*\d{4}/i)?.[0]
+    ?.toUpperCase()
+    .replace(/FY\s+/g, "FY");
+  const period =
+    requested ??
+    latestFinancialPeriod(sortPeriods(answer.metrics.map((m) => m.period)));
+  const selected = answer.metrics.filter((m) => m.period === period),
+    groupsOfFacts = [
+      ...new Set(selected.map((m) => JSON.stringify([m.name, metricBasis(m)]))),
+    ];
+  const displayedMetrics = groupsOfFacts.flatMap((key) => {
+    const [name, basis] = JSON.parse(key);
+    const m = selectMetric(
+      selected.filter((m) => metricBasis(m) === basis),
+      name,
+      period,
+    );
+    return m ? [m] : [];
+  });
+  const comparisons = quarterlyComparisons(answer.metrics, period).filter(
     (c) => c.values[0],
   );
   return (
@@ -68,9 +95,13 @@ export function ResearchAnswer({
         {answer.generated_at ? ` · ${date(answer.generated_at)}` : ""}. Source
         checks establish linkage; interpretations require review.
       </p>
-      {!!answer.metrics.length && (
+      {!!displayedMetrics.length && (
         <section className="report-section">
-          <h3>Reported financial findings</h3>
+          <h3>Reported financial findings · {period}</h3>
+          <p className="table-note">
+            Current answer period. Historical facts remain available in the
+            financial snapshot period selector.
+          </p>
           <div className="table-scroll">
             <table className="report-metrics">
               <thead>
@@ -81,13 +112,18 @@ export function ResearchAnswer({
                 </tr>
               </thead>
               <tbody>
-                {answer.metrics.map((m, i) => {
+                {displayedMetrics.map((m, i) => {
                   const source = answer.source_references.find(
                     (s) => s.document_id === m.document_id && s.page === m.page,
                   );
                   const original =
                     source?.url ??
                     documents.find((d) => d.id === m.document_id)?.url;
+                  const format =
+                    source?.source_format ??
+                    documents.find((d) => d.id === m.document_id)
+                      ?.source_format ??
+                    m.source_format;
                   return (
                     <tr key={m.id ?? `${m.document_id}-${m.name}-${i}`}>
                       <th scope="row">
@@ -101,12 +137,25 @@ export function ResearchAnswer({
                       <td>
                         {m.period}
                         {original ? (
-                          <SourceLink url={original} page={m.page}>
-                            PDF p.{m.page}
+                          <SourceLink
+                            url={original}
+                            page={m.page}
+                            format={format}
+                          >
+                            {sourceLocation(
+                              m.page,
+                              format,
+                              m.evidence_location,
+                            )}
                           </SourceLink>
                         ) : (
                           <small>
-                            See the company source library · PDF p.{m.page}
+                            See the company source library ·{" "}
+                            {sourceLocation(
+                              m.page,
+                              format,
+                              m.evidence_location,
+                            )}
                           </small>
                         )}
                       </td>
@@ -120,7 +169,7 @@ export function ResearchAnswer({
       )}
       {!!comparisons.length && (
         <section className="report-section">
-          <h3>Comparable quarter movements</h3>
+          <h3>Comparable reporting-period movements</h3>
           <div className="table-scroll">
             <table className="report-metrics">
               <thead>
@@ -181,9 +230,18 @@ export function ResearchAnswer({
                 <div>
                   <strong>{s.title}</strong>
                   <p>
-                    {s.period} · PDF page {s.page}
+                    {s.period} ·{" "}
+                    {sourceLocation(
+                      s.page,
+                      s.source_format,
+                      s.evidence_location,
+                    )}
                   </p>
-                  <SourceLink url={s.url} page={s.page}>
+                  <SourceLink
+                    url={s.url}
+                    page={s.page}
+                    format={s.source_format}
+                  >
                     Inspect original document
                   </SourceLink>
                 </div>
@@ -242,7 +300,9 @@ function Finding({
             {finding.source_ids
               .map((id) => {
                 const s = answer.source_references.find((s) => s.id === id);
-                return s ? `${id} · ${s.period} · PDF p.${s.page}` : id;
+                return s
+                  ? `${id} · ${s.period} · ${sourceLocation(s.page, s.source_format, s.evidence_location)}`
+                  : id;
               })
               .join(" / ")}
           </span>
@@ -267,8 +327,14 @@ function Finding({
           {finding.source_ids.map((id) => {
             const s = answer.source_references.find((s) => s.id === id);
             return s ? (
-              <SourceLink key={id} url={s.url} page={s.page}>
-                {id} · Inspect original PDF page {s.page}
+              <SourceLink
+                key={id}
+                url={s.url}
+                page={s.page}
+                format={s.source_format}
+              >
+                {id} ·{" "}
+                {sourceLocation(s.page, s.source_format, s.evidence_location)}
               </SourceLink>
             ) : null;
           })}

@@ -94,7 +94,7 @@ export function passageQuery(
     values.push(...terms);
   }
   return {
-    sql: `SELECT c.id,c.ticker,c.text,c.page,c.document_id,d.title,d.url,d.period,d.type FROM ${fts && terms.length ? "chunks_fts JOIN document_chunks c ON c.id=chunks_fts.chunk_id" : "document_chunks c"} JOIN documents d ON d.id=c.document_id WHERE ${clauses.join(" AND ")} ORDER BY ${fts && terms.length ? "rank," : ""} d.published_at DESC,c.page,c.id LIMIT 80`,
+    sql: `SELECT c.id,c.ticker,c.text,c.page,c.document_id,d.title,d.url,d.period,d.type,d.source_format FROM ${fts && terms.length ? "chunks_fts JOIN document_chunks c ON c.id=chunks_fts.chunk_id" : "document_chunks c"} JOIN documents d ON d.id=c.document_id WHERE ${clauses.join(" AND ")} ORDER BY ${fts && terms.length ? "rank," : ""} d.published_at DESC,c.page,c.id LIMIT 80`,
     values,
   };
 }

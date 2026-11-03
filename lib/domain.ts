@@ -22,6 +22,11 @@ export type Point = {
   date: string;
   close: number;
   adjusted_close: number | null;
+  open?: number;
+  high?: number;
+  low?: number;
+  provider?: string;
+  completion_status?: string;
   volume: number;
 };
 export type Settings = {
@@ -44,6 +49,8 @@ export const defaultSettings: Settings = {
   company_rules: {},
 };
 export type Evidence = {
+  source_format?: string;
+  evidence_location?: string;
   document_id: string;
   title: string;
   url: string;
@@ -102,6 +109,19 @@ export type Metric = {
   reporting_status?: string;
   updated_at?: string;
   published_at?: string | null;
+  original_value?: number | null;
+  original_unit?: string | null;
+  original_currency?: string | null;
+  original_scale?: string | null;
+  normalized_value?: number | null;
+  normalized_unit?: string | null;
+  evidence_location?: string | null;
+  period_kind?: string | null;
+  period_start?: string | null;
+  period_end?: string | null;
+  extraction_context?: string | null;
+  source_format?: string;
+  source_url?: string;
 };
 export type Guidance = {
   ticker: string;

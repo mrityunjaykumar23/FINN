@@ -116,7 +116,7 @@ function fixture() {
     ),
   );
   for (const f of readdirSync("drizzle")
-    .filter((f) => /^(?:000[6789]|001[01]).*\.sql$/.test(f))
+    .filter((f) => /^(?:000[6-9]|00[1-9]\d).*\.sql$/.test(f))
     .sort())
     db.exec(readFileSync("drizzle/" + f, "utf8"));
   return db;
@@ -146,7 +146,7 @@ test("incremental migration works on empty database with enforced foreign keys",
     ),
   );
   for (const f of readdirSync("drizzle")
-    .filter((f) => /^(?:000[6789]|001[01]).*\.sql$/.test(f))
+    .filter((f) => /^(?:000[6-9]|00[1-9]\d).*\.sql$/.test(f))
     .sort())
     db.exec(readFileSync("drizzle/" + f, "utf8"));
   assert.equal(db.prepare("PRAGMA foreign_keys").get().foreign_keys, 1);
@@ -272,7 +272,7 @@ test("unique company, filing and market ingestion; live observations coexist wit
     /UNIQUE/,
   );
   const insert = db.prepare(
-    "INSERT OR IGNORE INTO daily_prices VALUES (?,?,?,?,?,?,?,?)",
+    "INSERT OR IGNORE INTO daily_prices(ticker,date,close,adjusted_close,volume,source,retrieved_at,mode) VALUES (?,?,?,?,?,?,?,?)",
   );
   for (let i = 0; i < 2; i++)
     for (const mode of ["live", "historical"])
@@ -387,7 +387,9 @@ test("malformed JSON and invalid price observations fail constraints", () => {
   assert.throws(
     () =>
       db
-        .prepare("INSERT INTO daily_prices VALUES (?,?,?,?,?,?,?,?)")
+        .prepare(
+          "INSERT INTO daily_prices(ticker,date,close,adjusted_close,volume,source,retrieved_at,mode) VALUES (?,?,?,?,?,?,?,?)",
+        )
         .run("INFY.NS", "2025", -1, 1, 1, "test", "2025", "live"),
     /CHECK/,
   );

@@ -1,4 +1,7 @@
 import financialSources from "../../data/financial-sources.json" with { type: "json" };
+import { parseDocument, DomUtils } from "htmlparser2";
+import { fiscalPeriod } from "../periods.ts";
+export const DISCOVERY_VERSION = "primary_sources_v4";
 export type Candidate = {
   url: string;
   title: string;
@@ -20,19 +23,25 @@ export const disclosureNotice = (text: string) =>
   scheduledCallNotice(text) ||
   /newspaper[ -]publication|(?:audio|video)[ -]recording/i.test(text);
 export const documentType = (text: string) =>
-  /transcript/i.test(text)
-    ? "transcript"
-    : disclosureNotice(text)
-      ? "announcement"
-      : /concall|earnings.call/i.test(text)
-        ? "transcript"
-        : /annual.report|annual\s+report/i.test(text)
-          ? "annual_report"
-          : /presentation/i.test(text)
-            ? "presentation"
-            : /result|financial.statement/i.test(text)
-              ? "results"
-              : "announcement";
+  /voting.results|scrutiniz|postal.ballot|outcomeofpb/i.test(text)
+    ? "announcement"
+    : /transcript/i.test(text)
+      ? "transcript"
+      : disclosureNotice(text)
+        ? "announcement"
+        : /concall|earnings.call/i.test(text)
+          ? "transcript"
+          : /annual.report|annual\s+report/i.test(text)
+            ? "annual_report"
+            : /presentation/i.test(text)
+              ? "presentation"
+              : /result|financial.statement|integrated.filing.indas|ixbrl|xbrl/i.test(
+                    text,
+                  ) ||
+                  (/press.release/i.test(text) &&
+                    /Q[1-4]\s*FY\s*\d{2,4}|quarter.{0,30}ended/i.test(text))
+                ? "results"
+                : "announcement";
 const decode = (s: string) =>
   s
     .replace(/&amp;/g, "&")
@@ -50,7 +59,7 @@ export function parseCandidates(
   allowed: (url: string, host?: string) => boolean,
 ) {
   const website = html.match(
-    /href=["'](https:\/\/[^"']+)["'][^>]*>\s*(?:[\s\S]{0,150}?)?(?:Website|Company website)/i,
+    /href=["'](https?:\/\/[^"']+)["'][^>]*>\s*(?:[\s\S]{0,150}?)?(?:Website|Company website)/i,
   );
   let officialHost: string | undefined;
   try {
@@ -64,7 +73,7 @@ export function parseCandidates(
   )) {
     const url = decode(m[2]),
       title = plain(m[4]);
-    if (!/\.pdf(?:\?|$)/i.test(url) || !allowed(url, officialHost) || !title)
+    if (!financialSourceUrl(url) || !allowed(url, officialHost) || !title)
       continue;
     if (candidates.some((c) => c.url === url)) continue;
     // Only an explicit date attached to this link is a publication date. URL dates,
@@ -76,7 +85,7 @@ export function parseCandidates(
       rawDate && !Number.isNaN(Date.parse(rawDate)) ? rawDate : null;
     const period =
       title
-        .match(/(?:Q[1-4]\s+)?FY\s*\d{4}/i)?.[0]
+        .match(/(?:Q[1-4]\s*)?FY\s*\d{4}/i)?.[0]
         ?.replace(/FY\s+/i, "FY")
         .toUpperCase() ?? null;
     candidates.push({
@@ -92,6 +101,127 @@ export function parseCandidates(
   }
   return { candidates, officialHost };
 }
+export function financialSourceUrl(url: string) {
+  return /\.pdf(?:[?#]|$)|\.(?:xbrl|xml)(?:[?#]|$)|\/corporate\/ixbrl\/[^?#]+\.html?(?:[?#]|$)/i.test(
+    url,
+  );
+}
+function candidatePeriod(title: string) {
+  title = title.replace(/_/g, " ");
+  const q = title.match(/Q([1-4])\s*FY\s*['’]?(\d{2,4})/i);
+  if (q) return `Q${q[1]} FY${Number(q[2]) < 100 ? 2000 + Number(q[2]) : q[2]}`;
+  const range = title.match(/(?:FY\s*)?(20\d{2})[–-](\d{2}|20\d{2})(?!\d)/i);
+  if (range)
+    return `FY${range[2].length === 2 ? Number(range[1].slice(0, 2) + range[2]) : range[2]}`;
+  const y = title.match(/FY\s*['’]?(\d{4})/i);
+  return y ? `FY${y[1]}` : null;
+}
+export function officialFinancialLinks(
+  html: string,
+  base: string,
+  host: string,
+  allowed: (url: string, host?: string) => boolean,
+) {
+  const dom = parseDocument(html);
+  for (const node of DomUtils.findAll(
+    (e) => ["script", "style", "noscript"].includes(e.name),
+    dom.children,
+  ))
+    DomUtils.removeElement(node);
+  const anchors = DomUtils.findAll(
+    (e) => e.name === "a" && !!e.attribs.href,
+    dom.children,
+  );
+  const candidates: Candidate[] = [],
+    pages: { url: string; score: number }[] = [];
+  for (const a of anchors) {
+    let url: string;
+    try {
+      url = new URL(a.attribs.href, base).href;
+      if (url.startsWith("http://")) url = url.replace(/^http:/, "https:");
+    } catch {
+      continue;
+    }
+    if (!allowed(url, host)) continue;
+    const title =
+      DomUtils.textContent(a).replace(/\s+/g, " ").trim() ||
+      decodeURIComponent(new URL(url).pathname.split("/").at(-1) ?? "");
+    if (financialSourceUrl(url)) {
+      const caption = title + " " + decodeURIComponent(new URL(url).pathname);
+      candidates.push({
+        url,
+        title: title.slice(0, 240),
+        type: documentType(caption),
+        published_at: null,
+        period: candidatePeriod(caption),
+        officialHost: host,
+        order: candidates.length,
+      });
+    } else if (
+      new URL(url).hostname.replace(/^www\./, "") === host &&
+      !/\.(?:mp3|mp4|zip|jpg|png|svg)(?:[?#]|$)/i.test(url)
+    ) {
+      const s = title + " " + url;
+      if (
+        /investor|financial|quarter|annual|results|transcript|earnings/i.test(
+          s,
+        ) &&
+        !/[?&]year=20(?:0\d|1\d|2[0-5])/i.test(url)
+      )
+        pages.push({
+          url,
+          score: /quarter|result/i.test(s)
+            ? 100
+            : /financial/i.test(s)
+              ? 80
+              : /annual|transcript/i.test(s)
+                ? 70
+                : 50,
+        });
+    }
+  }
+  return {
+    candidates,
+    pages: [...new Map(pages.map((p) => [p.url, p])).values()].sort(
+      (a, b) => b.score - a.score,
+    ),
+  };
+}
+async function discoverOfficial(
+  host: string,
+  allowed: (url: string, host?: string) => boolean,
+) {
+  const root = `https://www.${host}/`,
+    seen = new Set<string>([root]),
+    found: Candidate[] = [];
+  let frontier = [{ url: root, score: 100 }];
+  // Two bounded link levels reach common investor/results paths without guessing company URLs.
+  for (let depth = 0; depth < 3 && frontier.length; depth++) {
+    const batch = frontier.slice(0, depth === 0 ? 1 : 2);
+    frontier = [];
+    const results = await Promise.allSettled(
+      batch.map(async (p) =>
+        officialFinancialLinks(
+          await fetchPublicDirectory(p.url),
+          p.url,
+          host,
+          allowed,
+        ),
+      ),
+    );
+    for (const r of results)
+      if (r.status === "fulfilled") {
+        found.push(...r.value.candidates);
+        for (const p of r.value.pages)
+          if (!seen.has(p.url)) {
+            seen.add(p.url);
+            frontier.push(p);
+          }
+      }
+    frontier.sort((a, b) => b.score - a.score);
+  }
+  return [...new Map(found.map((c) => [c.url, c])).values()];
+}
 export function rankCandidates(
   candidates: Candidate[],
   question = "",
@@ -99,9 +229,9 @@ export function rankCandidates(
 ) {
   const preferred =
     filters.type ??
-    (/guidance|management|expansion|outlook|risk/i.test(question)
+    (/guidance|management|expansion|outlook/i.test(question)
       ? "transcript"
-      : /balance.sheet|cash|debt|annual/i.test(question)
+      : /balance.sheet|cash|debt|annual|risk/i.test(question)
         ? "annual_report"
         : "results");
   const requested =
@@ -128,6 +258,11 @@ export function rankCandidates(
             : 0) +
     (requested ? (c.period === requested ? 160 : c.period ? -100 : 0) : 0) +
     tokens.filter((t) => c.title.toLowerCase().includes(t)).length * 8 +
+    (/financial.results|financial.statements|unaudited|audited|integrated.filing.indas/i.test(
+      c.title,
+    ) && !/press.release/i.test(c.title)
+      ? 18
+      : 0) +
     (c.published_at ? 15 : 0) +
     (c.extraction_status === "complete" ? 25 : 0) +
     (c.total_pages && c.indexed_pages
@@ -142,12 +277,35 @@ export function rankCandidates(
           ),
         )
       : 0);
-  return [...candidates].sort(
-    (a, b) =>
+  return [...candidates].sort((a, b) => {
+    const affinity = (c: Candidate) =>
+      c.type === preferred
+        ? 0
+        : c.type === "results"
+          ? 1
+          : c.type === "presentation"
+            ? 2
+            : c.type === "annual_report"
+              ? 3
+              : c.type === "transcript"
+                ? 4
+                : 5;
+    if (!requested) {
+      const type = affinity(a) - affinity(b);
+      if (type) return type;
+      const ap = fiscalPeriod(a.period ?? ""),
+        bp = fiscalPeriod(b.period ?? "");
+      if (!!ap !== !!bp) return ap ? -1 : 1;
+      if (ap && bp && ap.ordinal !== bp.ordinal) return bp.ordinal - ap.ordinal;
+    }
+    return (
       score(b) - score(a) ||
+      (fiscalPeriod(b.period ?? "")?.ordinal ?? 0) -
+        (fiscalPeriod(a.period ?? "")?.ordinal ?? 0) ||
       (b.published_at ?? "").localeCompare(a.published_at ?? "") ||
-      a.order - b.order,
-  );
+      a.order - b.order
+    );
+  });
 }
 export async function locatePrimaryCandidates(
   ticker: string,
@@ -217,7 +375,7 @@ export async function locatePrimaryCandidates(
       if (![301, 302, 303, 307, 308].includes(r.status) || !target) return null;
       const original = new URL(target, "https://www.screener.in").href;
       if (
-        !/\.pdf(?:\?|$)/i.test(original) ||
+        !financialSourceUrl(original) ||
         !allowed(original, parsed.officialHost)
       )
         return null;
@@ -235,11 +393,17 @@ export async function locatePrimaryCandidates(
   const first = originals.flatMap((r) =>
     r.status === "fulfilled" && r.value ? [r.value] : [],
   );
+  const official = parsed.officialHost
+    ? await discoverOfficial(parsed.officialHost, allowed).catch(() => [])
+    : [];
   return {
     ...parsed,
     candidates: [
-      ...first,
-      ...parsed.candidates.filter((c) => !first.some((p) => p.url === c.url)),
+      ...official,
+      ...first.filter((c) => !official.some((p) => p.url === c.url)),
+      ...parsed.candidates.filter(
+        (c) => ![...first, ...official].some((p) => p.url === c.url),
+      ),
     ],
   };
 }

@@ -175,14 +175,17 @@ test("materiality uses compatible company evidence, distinguishes action/directi
   );
 });
 test("scoped tables preserve mixed basis, scales, date periods and explicit continued pages", () => {
-  const r = extractExplicitTables([
-    {
-      page: 1,
-      text: "Consolidated results\nINR crore\nMetric | Quarter ended 31 March 2026 | Quarter ended 31 March 2025\nRevenue | 100 | 80\nStandalone results\nINR million\nMetric | FY2026 | FY2025\nPAT | 50 | 40",
-    },
-    { page: 2, text: "Financial statement continued\nEquity | 500 | 450" },
-    { page: 3, text: "Unrelated page\nDebt | 10 | 20" },
-  ]);
+  const r = extractExplicitTables(
+    [
+      {
+        page: 1,
+        text: "Consolidated results\nINR crore\nMetric | Quarter ended 31 March 2026 | Quarter ended 31 March 2025\nRevenue | 100 | 80\nStandalone results\nINR million\nMetric | FY2026 | FY2025\nPAT | 50 | 40",
+      },
+      { page: 2, text: "Financial statement continued\nEquity | 500 | 450" },
+      { page: 3, text: "Unrelated page\nDebt | 10 | 20" },
+    ],
+    3,
+  );
   assert.equal(r.metrics.length, 6);
   assert.equal(r.metrics[0].period, "Q4 FY2026");
   assert.equal(r.metrics[0].unit, "INR crore");
@@ -612,8 +615,14 @@ test("discovery resumes every older record while checking the new head", async (
 
 import { documentType } from "../lib/ingestion/discovery.ts";
 test("conference-call invitations are not results PDFs or completed transcripts", () => {
-  assert.equal(documentType("Newspaper Publication of Audited Financial Results"), "announcement");
-  assert.equal(documentType("Audio recording of the earnings call on financial results"), "announcement");
+  assert.equal(
+    documentType("Newspaper Publication of Audited Financial Results"),
+    "announcement",
+  );
+  assert.equal(
+    documentType("Audio recording of the earnings call on financial results"),
+    "announcement",
+  );
   assert.equal(
     documentType(
       "Announcement under Regulation 30 (LODR)-Analyst / Investor Meet - Intimation regarding schedule of investors and analysts results conference call for the quarter and half-year ended September 30, 2026.",

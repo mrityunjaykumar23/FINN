@@ -1,3 +1,4 @@
+import { financialAnalysis } from "./financial-analysis.ts";
 import {
   compareGuidance,
   percentChange,
@@ -171,6 +172,51 @@ export function calculateFindings(
           });
       }
     }
+  }
+  if (
+    /margin|ratio|fcf|free cash|roe|roce|working capital|inventory days|receivable|payable|ttm|cagr|leverage|debt.to.equity|cash conversion/i.test(
+      q,
+    )
+  ) {
+    const target =
+      requestedPeriod ??
+      (/annual|cagr|roe|roce/i.test(q)
+        ? sortPeriods(
+            rows.filter((m) => /^FY/.test(m.period)).map((m) => m.period),
+          )[0]
+        : comparisonPeriods(rows)[0]);
+    if (target)
+      for (const c of financialAnalysis(
+        rows,
+        target,
+        /BANK\.NS$/.test(ticker) ? "financial" : "nonfinancial",
+      ).filter((c) => c.status === "verified")) {
+        const relevant = /margin/.test(q)
+          ? /margin/i.test(c.name)
+          : /ttm/.test(q)
+            ? /TTM/.test(c.name)
+            : /cagr/.test(q)
+              ? /CAGR/.test(c.name)
+              : /roe|roce/.test(q)
+                ? /ROE|ROCE/.test(c.name)
+                : /debt|leverage/.test(q)
+                  ? /equity|ratio/i.test(c.name)
+                  : /working capital|inventory|receivable|payable/.test(q)
+                    ? /days|cycle/.test(c.name)
+                    : /cash/.test(q)
+                      ? /cash/i.test(c.name)
+                      : true;
+        if (relevant && !findings.some((f) => f.text.includes(c.name)))
+          findings.push({
+            text: `${c.period} ${c.name}: ${money(c.value!)} ${c.unit}. Definition: ${c.formula}. Inputs: ${c.inputs.map((m) => `${m.name} ${m.value} ${m.unit} (${m.period})`).join("; ")}.`,
+            sources: [
+              ...new Map(
+                c.inputs.map((m) => [`${m.document_id}:${m.page}`, source(m)]),
+              ).values(),
+            ],
+            evidence_type: "calculated",
+          });
+      }
   }
   return findings;
 }

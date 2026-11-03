@@ -52,7 +52,9 @@ test(
     assert.notEqual(results.id, dividend.id);
     assert.equal(results.document_id, dividend.document_id);
     assert.equal(results.evidence_page, dividend.evidence_page);
-    const digest = await api("digest?start=2025-04-17&end=2025-04-17");
+    const digest = await api(
+      "digest?mode=historical&start=2025-04-17&end=2025-04-17",
+    );
     assert.ok(digest.events.some((e) => e.id === results.id));
     assert.ok(digest.events.some((e) => e.id === dividend.id));
     const alerts = (await api("alerts")).alerts;

@@ -1,3 +1,18 @@
+import { sortPeriods } from "../periods";
+import {
+  financialContexts,
+  explicitFinancialPeriod,
+} from "../financial-context";
+import { financialError } from "../financial-errors";
+import { parseStructuredFinancials } from "../structured-financials";
+import {
+  prepareFinancialMetric,
+  financialExtractorVersion,
+  persistStructuredFacts,
+  startMetricExtraction,
+  finishMetricExtraction,
+  normalizeStoredMetric,
+} from "../financial-store";
 import {
   PDF_LAYOUT_VERSION,
   extractPdfFinancials,
@@ -10,6 +25,7 @@ import {
   one,
   run,
   budget,
+  db,
   lock,
   unlock,
   sha,
@@ -151,7 +167,20 @@ export async function synthesizeResearch(
       sources.some((s) => s.document_id === m.document_id && s.page === m.page),
     )
     .slice(0, 80)
-    .map((m) => ({ ...m, evidence_text: undefined }));
+    .map((m) => ({
+      id: m.id,
+      ticker: m.ticker,
+      name: m.name,
+      value: m.value,
+      period: m.period,
+      unit: m.unit,
+      basis: m.basis,
+      document_id: m.document_id,
+      page: m.page,
+      currency: m.currency,
+      scale: m.scale,
+      verification_status: m.verification_status,
+    }));
   const input = {
     ticker,
     question,
@@ -172,6 +201,76 @@ export async function extractDocument(
   documentId: string,
   options: { preferDeterministic?: boolean; deterministicOnly?: boolean } = {},
 ) {
+  await startMetricExtraction(documentId);
+  try {
+    const result = await extractDocumentWork(ticker, documentId, options);
+    const metrics = await all<{ id: string }>(
+      "SELECT id FROM financial_metrics WHERE document_id=? AND verification_status<>'unverified' AND original_value IS NULL",
+      documentId,
+    );
+    for (const m of metrics) await normalizeStoredMetric(m.id);
+    const error = /failed|error|rejected/.test(result.status)
+      ? financialError(
+          {
+            message:
+              "error_code" in result
+                ? String(result.error_code)
+                : result.status,
+          },
+          "extraction",
+        ).code
+      : undefined;
+    await finishMetricExtraction(documentId, error);
+    await run(
+      "INSERT OR REPLACE INTO meta(key,value) VALUES (?,?)",
+      `financial-checked:${documentId}`,
+      financialExtractorVersion,
+    );
+    return result;
+  } catch (e) {
+    const failure = financialError(e, "extraction");
+    await run(
+      "UPDATE metric_processing SET state='Extraction failed',error_code=?,detail=?,updated_at=? WHERE document_id=? AND state IN ('Extracting','Extracted, awaiting validation')",
+      failure.code,
+      failure.message,
+      new Date().toISOString(),
+      documentId,
+    );
+    await finishMetricExtraction(documentId, failure.code);
+    throw e;
+  }
+}
+async function extractDocumentWork(
+  ticker: string,
+  documentId: string,
+  options: { preferDeterministic?: boolean; deterministicOnly?: boolean } = {},
+) {
+  const payload = await one<{ raw: string }>(
+    "SELECT raw FROM source_payloads WHERE document_id=?",
+    documentId,
+  );
+  if (payload) {
+    const company = await one<{ name: string }>(
+      "SELECT name FROM companies WHERE ticker=?",
+      ticker,
+    );
+    const parsed = parseStructuredFinancials(payload.raw, {
+      ticker,
+      name: company?.name ?? ticker,
+    });
+    const count = await persistStructuredFacts(
+      ticker,
+      documentId,
+      parsed.facts,
+    );
+    await finishMetricExtraction(documentId);
+    return {
+      metrics: count,
+      guidance: 0,
+      status: "verified_structured_financials",
+      ai_status: "not_required",
+    };
+  }
   const chunks = await all<Source>(
     "SELECT c.id,c.document_id,c.ticker,c.page,c.text,d.period FROM document_chunks c JOIN documents d ON d.id=c.document_id WHERE c.document_id=? AND c.ticker=? ORDER BY c.page,CAST(substr(c.id,length(c.document_id)+length(CAST(c.page AS TEXT))+3) AS INTEGER)",
     documentId,
@@ -188,11 +287,26 @@ export async function extractDocument(
             (prior.endsWith(c.text.slice(0, 200)) ? c.text.slice(200) : c.text),
     );
   }
+  const savedCalendar = await one<{ value: string }>(
+    "SELECT value FROM meta WHERE key=?",
+    `fiscal-calendar:${ticker}`,
+  );
+  const cal = savedCalendar ? JSON.parse(savedCalendar.value) : null;
+  const yearEndMonth =
+    cal?.yearEndMonth ??
+    cal?.month ??
+    financialSources.find((c) => c.ticker === ticker)?.yearEndMonth;
+  const contexts = financialContexts(
+    [...pageMap].map(([page, text]) => ({ page, text })),
+    ticker,
+  );
   const prose = extractReportedProse(
     [...pageMap].map(([page, text]) => ({ page, text })),
+    yearEndMonth,
   );
   const table = extractExplicitTables(
     [...pageMap].map(([page, text]) => ({ page, text })),
+    yearEndMonth,
   );
   prose.metrics.push(...table.metrics);
   const layouts = await all<{ payload: string }>(
@@ -219,9 +333,33 @@ export async function extractDocument(
   const layout = extractPdfFinancials(
     layouts.map((l) => JSON.parse(l.payload) as PdfLayout),
     { ticker, name: company?.name ?? ticker },
-    verified,
+    {
+      ...verified,
+      yearEndMonth: cal?.yearEndMonth ?? cal?.month ?? verified?.yearEndMonth,
+      sectionContexts: Object.fromEntries(contexts),
+    },
   );
   prose.metrics.push(...layout.metrics);
+  if (layout.calendar)
+    await run(
+      "INSERT OR REPLACE INTO meta(key,value) VALUES (?,?)",
+      `fiscal-calendar:${ticker}`,
+      JSON.stringify({
+        ...layout.calendar,
+        yearEndMonth: layout.calendar.month,
+        document_id: documentId,
+      }),
+    );
+  const bestPeriod = sortPeriods([
+    ...layout.periods,
+    ...layout.metrics.map((m) => m.period),
+  ])[0];
+  if (bestPeriod)
+    await run(
+      "UPDATE documents SET period=?,period_status='source_table_header' WHERE id=?",
+      bestPeriod,
+      documentId,
+    );
   for (const review of layout.reviews)
     await run(
       "INSERT INTO extraction_audit(id,document_id,method,status,reason,created_at) VALUES (?,?,?,?,?,?)",
@@ -242,42 +380,28 @@ export async function extractDocument(
       `Page ${r.page}: ${r.reason}`,
       new Date().toISOString(),
     );
-  const nowProse = new Date().toISOString();
-  await run(
-    "UPDATE financial_metrics SET verification_status='unverified' WHERE document_id=? AND extraction_method IN ('explicit_prose_v1','explicit_table_v1','explicit_table_v2','pdf_layout_v1','pdf_layout_v2','pdf_layout_v3')",
-    documentId,
-  );
+  const deterministicStatements = [
+    db()
+      .prepare(
+        "UPDATE financial_metrics SET verification_status='unverified' WHERE document_id=? AND extraction_method IN ('explicit_prose_v1','explicit_table_v1','explicit_table_v2','pdf_layout_v1','pdf_layout_v2','pdf_layout_v3','pdf_layout_v4','pdf_layout_v5','pdf_layout_v6','pdf_layout_v7')",
+      )
+      .bind(documentId),
+  ];
+  let deterministicAccepted = 0;
   for (const m of prose.metrics) {
-    const id = await sha(
-      `${ticker}:${m.name}:${m.period}:${m.basis}:${documentId}`,
-    );
-    await run(
-      `INSERT INTO financial_metrics(id,ticker,name,value,period,unit,basis,document_id,page,evidence_text,extraction_method,verification_status,updated_at,currency,scale,fiscal_year,fiscal_quarter) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value,evidence_text=excluded.evidence_text,page=excluded.page,updated_at=excluded.updated_at,verification_status=excluded.verification_status WHERE financial_metrics.extraction_method IN ('explicit_prose_v1','explicit_table_v1','explicit_table_v2','pdf_layout_v1','pdf_layout_v2','pdf_layout_v3')`,
-      id,
+    const record = await prepareFinancialMetric(
       ticker,
-      m.name,
-      m.value,
-      m.period,
-      m.unit,
-      m.basis,
       documentId,
-      m.page,
-      m.evidence_text,
+      m,
       m.extraction_method ?? "explicit_prose_v1",
-      "source_checked",
-      nowProse,
-      m.unit === "%" ? null : "INR",
-      m.unit === "%" ? null : m.unit.replace(/^INR /, ""),
-      Number(m.period.match(/FY(\d{4})/)![1]),
-      Number(m.period.match(/^Q([1-4])/)?.[1]) || null,
     );
-    if (m.reporting_status)
-      await run(
-        "UPDATE financial_metrics SET reporting_status=? WHERE id=?",
-        m.reporting_status,
-        id,
-      );
+    if (record) {
+      deterministicStatements.push(record.statement);
+      deterministicAccepted++;
+    }
   }
+  // Withdraw stale parser output and replace it in one atomic batch; failed writes preserve old facts.
+  await db().batch(deterministicStatements);
   for (const g of prose.guidance) {
     const id = await sha(
         `${ticker}:${g.metric}:${g.period}:${g.basis}:${documentId}:${g.page}`,
@@ -318,16 +442,18 @@ export async function extractDocument(
       previous?.id ?? null,
     );
   }
-  if (options.preferDeterministic && layout.metrics.length)
+  if (options.preferDeterministic && layout.metrics.length) {
+    await finishMetricExtraction(documentId);
     return {
-      metrics: prose.metrics.length,
+      metrics: deterministicAccepted,
       guidance: prose.guidance.length,
       status: "verified_pdf_table",
       ai_status: "not_required",
     };
+  }
   if (options.deterministicOnly || !providerStatus().enabled)
     return {
-      metrics: prose.metrics.length,
+      metrics: deterministicAccepted,
       guidance: prose.guidance.length,
       status: "offline_explicit_prose",
     };
@@ -339,7 +465,12 @@ export async function extractDocument(
   const sources = extractionPassages(
     chunks,
     documentMeta?.type ?? "results",
-  ).map((s) => ({ ...s, text: s.text.slice(0, 2400) }));
+  ).map((s) => ({
+    ...s,
+    text: s.text.slice(0, 2400),
+    period: explicitFinancialPeriod(s.text) ?? s.period,
+    context_text: contexts.get(s.page)?.quote,
+  }));
   if (!sources.length)
     return { metrics: 0, guidance: 0, status: "no_relevant_text" };
   let result;
@@ -363,7 +494,7 @@ export async function extractDocument(
       new Date().toISOString(),
     );
     return {
-      metrics: prose.metrics.length,
+      metrics: deterministicAccepted,
       guidance: prose.guidance.length,
       status: "gemini_extraction_failed",
       error_code: e instanceof AiFailure ? e.code : "validation_failed",
@@ -380,6 +511,7 @@ export async function extractDocument(
       `${result.rejected} candidate rows failed source/period validation.`,
       now,
     );
+  let modelAccepted = 0;
   for (const m of result.metrics) {
     const deterministic = layout.metrics.filter(
       (d) =>
@@ -401,33 +533,26 @@ export async function extractDocument(
       continue;
     }
     const source = sources.find((s) => s.id === m.source_id)!;
-    const id = await sha(
-      `${ticker}:${m.name}:${m.period}:${m.basis}:${m.unit}:${documentId}`,
-    );
-    await run(
-      `INSERT OR IGNORE INTO financial_metrics(id,ticker,name,value,period,unit,basis,document_id,page,currency,scale,fiscal_year,fiscal_quarter,evidence_text,extraction_method,verification_status,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      id,
+    const record = await prepareFinancialMetric(
       ticker,
-      m.name,
-      m.value,
-      m.period,
-      m.unit,
-      m.basis,
       documentId,
-      source.page,
-      /INR|₹/.test(m.unit) ? "INR" : /USD|\$/.test(m.unit) ? "USD" : null,
-      /crore/i.test(m.unit)
-        ? "crore"
-        : /million/i.test(m.unit)
-          ? "million"
-          : null,
-      Number(m.period.match(/FY(\d{4})/)![1]),
-      Number(m.period.match(/^Q([1-4])/)?.[1]) || null,
-      m.evidence_excerpt,
+      {
+        ...m,
+        page: source.page,
+        evidence_text: m.evidence_excerpt,
+        evidence_location: `PDF page ${source.page}; verified literal excerpt`,
+        extraction_context: JSON.stringify({
+          scope_source: contexts.get(source.page) ?? null,
+          source_id: source.id,
+        }),
+      },
       "gemini",
-      "source_checked",
-      now,
+      true,
     );
+    if (record) {
+      await db().batch([record.statement]);
+      modelAccepted++;
+    }
   }
   for (const g of result.guidance) {
     const source = sources.find((s) => s.id === g.source_id)!;
@@ -465,7 +590,7 @@ export async function extractDocument(
     );
   }
   return {
-    metrics: result.metrics.length,
+    metrics: modelAccepted + deterministicAccepted,
     guidance: result.guidance.length,
     status: "source_checked",
     rejected: result.rejected,

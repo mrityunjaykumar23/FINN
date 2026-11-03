@@ -1510,3 +1510,9 @@ textarea:focus {
   color: var(--finn-warning);
   overflow-wrap: anywhere;
 }
+
+.snapshot-details {border-top:1px solid var(--finn-border);margin-top:14px;padding-top:12px;min-width:0;}
+.snapshot-details summary {cursor:pointer;color:var(--finn-text-secondary);font-size:12px;}
+.snapshot-details p,.snapshot-details small {overflow-wrap:anywhere;}
+.snapshot-detail {display:flex;flex-direction:column;gap:5px;padding:10px 0;border-bottom:1px solid var(--finn-border);font-size:12px;}
+.snapshot-detail small {color:var(--finn-text-secondary);font-size:11px;}

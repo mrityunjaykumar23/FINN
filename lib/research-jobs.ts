@@ -155,6 +155,31 @@ export async function runResearchPhase(job: Job) {
         job.id,
       );
     if (job.phase === "discovery") {
+      let latestDiscovery: Awaited<
+        ReturnType<typeof discoverDocuments>
+      > | null = null;
+      const explicitPeriod =
+        filters.period ??
+        job.question.match(/(?:Q[1-4]\s+|H[12]\s+)?FY\s*\d{4}/i)?.[0];
+      if (!explicitPeriod) {
+        latestDiscovery = await discoverDocuments(job.ticker, {
+          ...filters,
+          question: job.question,
+          queueOnly: true,
+        });
+        const id =
+          "job_ids" in latestDiscovery
+            ? (latestDiscovery.job_ids as string[] | undefined)?.[0]
+            : undefined;
+        if (id) {
+          await next(
+            "documents",
+            "Checking the latest relevant primary source before research synthesis.",
+            id,
+          );
+          return;
+        }
+      }
       const docs = await all<{ id: string }>(
         `SELECT id FROM documents WHERE ticker=? ${filters.type ? "AND type=?" : ""} ${filters.period ? "AND period=?" : ""} LIMIT 1`,
         job.ticker,
@@ -178,12 +203,17 @@ export async function runResearchPhase(job: Job) {
         );
         return;
       }
-      const discovered = await discoverDocuments(job.ticker, {
-        ...filters,
-        question: job.question,
-        queueOnly: true,
-      });
-      let id = "job_ids" in discovered ? discovered.job_ids?.[0] : undefined;
+      const discovered =
+        latestDiscovery ??
+        (await discoverDocuments(job.ticker, {
+          ...filters,
+          question: job.question,
+          queueOnly: true,
+        }));
+      let id =
+        "job_ids" in discovered
+          ? (discovered.job_ids as string[] | undefined)?.[0]
+          : undefined;
       if (!id) {
         // Discovery cooldowns must still resume previously queued work, rather than duplicate downloads.
         id = (
@@ -219,13 +249,41 @@ export async function runResearchPhase(job: Job) {
         "SELECT status,document_id,error FROM document_jobs WHERE id=?",
         job.document_job_id,
       );
-      if (!doc?.document_id)
+      if (!doc?.document_id) {
+        const alternative = await one<{ id: string }>(
+          `SELECT id FROM document_jobs WHERE ticker=? AND id<>? AND status IN ('pending','extraction_pending') AND attempts<3 ${filters.type ? "AND type=?" : ""} ORDER BY created_at,id LIMIT 1`,
+          job.ticker,
+          job.document_job_id,
+          ...(filters.type ? [filters.type] : []),
+        );
+        if (alternative) {
+          await next(
+            "documents",
+            "The first source could not be indexed. Trying the next queued independent original.",
+            alternative.id,
+          );
+          return;
+        }
+        const available = await one(
+          `SELECT id FROM documents WHERE ticker=? ${filters.type ? "AND type=?" : ""} ${filters.period ? "AND period=?" : ""} AND indexed_pages>0 LIMIT 1`,
+          job.ticker,
+          ...(filters.type ? [filters.type] : []),
+          ...(filters.period ? [filters.period] : []),
+        );
+        if (available) {
+          await next(
+            "analysis",
+            "Source retrieval needs review; using available indexed primary evidence with its reporting dates.",
+          );
+          return;
+        }
         throw new Error(
           doc?.error ||
             (processed.results.length
               ? "Original could not be indexed."
               : "Document job is waiting for its retry window. Retry this request after the source cooldown."),
         );
+      }
       await next(
         doc.status === "complete" ? "analysis" : "extraction",
         "Original text indexed. Preparing financial extraction without another download.",

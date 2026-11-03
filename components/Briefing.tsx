@@ -51,11 +51,18 @@ export function Briefing({
   onView: (v: View) => void;
   onSources: () => void;
 }) {
+  const today = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+  }).format(new Date());
   const [days, setDays] = useState("1"),
     [company, setCompany] = useState(""),
     [category, setCategory] = useState(""),
-    [customStart, setCustomStart] = useState("2025-04-16"),
-    [customEnd, setCustomEnd] = useState("2025-04-22");
+    [customStart, setCustomStart] = useState(
+      mode === "historical" ? "2025-04-16" : today,
+    ),
+    [customEnd, setCustomEnd] = useState(
+      mode === "historical" ? "2025-04-22" : today,
+    );
   const [digest, setDigest] = useState<Digest | null>(null),
     [loading, setLoading] = useState(true),
     [error, setError] = useState(""),
@@ -169,7 +176,7 @@ export function Briefing({
         </div>
         <div className="segmented" aria-label="Briefing window">
           {[
-            ["1", "1 calendar day"],
+            ["1", mode === "historical" ? "1 calendar day" : "24 hours"],
             ["7", "7 days"],
             ["custom", "Custom"],
           ].map(([value, label]) => (
@@ -447,7 +454,7 @@ export function Briefing({
             <Info size={13} />
             {mode === "historical"
               ? "A verified replay, not a complete exchange feed. Date-only disclosures use calendar-day windows."
-              : "Live disclosures appear after authorised ingestion. Empty coverage does not mean no filings occurred."}
+              : "Bounded source checks run on opening. Timestamped filings use rolling windows; date-only disclosures retain calendar-date precision. Empty coverage does not mean no filings occurred."}
           </p>
           {!!digest?.unavailable_source_companies.length && (
             <p className="coverage-note">
@@ -467,33 +474,43 @@ export function Briefing({
               <em>What was delivered.</em>
             </h3>
             <p>Put management’s guidance next to the reported result.</p>
-            <div className="promise-company">
-              <TickerIcon ticker="INFY.NS" small />
-              <strong>Infosys</strong>
-              <span>FY2025</span>
-            </div>
-            <div className="promise-numbers">
-              <div>
-                <span>GUIDED</span>
-                <strong>
-                  4.5–5.0<small>%</small>
-                </strong>
+            {mode === "historical" ? (
+              <>
+                <div className="promise-company">
+                  <TickerIcon ticker="INFY.NS" small />
+                  <strong>Infosys</strong>
+                  <span>FY2025</span>
+                </div>
+                <div className="promise-numbers">
+                  <div>
+                    <span>GUIDED</span>
+                    <strong>
+                      4.5–5.0<small>%</small>
+                    </strong>
+                  </div>
+                  <span className="compare-arrow">→</span>
+                  <div>
+                    <span>DELIVERED</span>
+                    <strong>
+                      4.2<small>%</small>
+                    </strong>
+                  </div>
+                </div>
+                <div className="variance-line">
+                  <span className="negative">−0.3 pp</span>
+                  <span>below the lower bound</span>
+                </div>
+                <div className="promise-footnote">
+                  Constant-currency revenue growth · January revised guidance
+                </div>
+              </>
+            ) : (
+              <div className="promise-footnote">
+                View the latest stored guidance for each company and metric,
+                with its target period, original statement and comparable
+                result. Missing current evidence remains unavailable.
               </div>
-              <span className="compare-arrow">→</span>
-              <div>
-                <span>DELIVERED</span>
-                <strong>
-                  4.2<small>%</small>
-                </strong>
-              </div>
-            </div>
-            <div className="variance-line">
-              <span className="negative">−0.3 pp</span>
-              <span>below the lower bound</span>
-            </div>
-            <div className="promise-footnote">
-              Constant-currency revenue growth · January revised guidance
-            </div>
+            )}
             <button onClick={() => onView("promises")}>
               Follow the evidence <ArrowRight size={15} />
             </button>

@@ -2,7 +2,7 @@ import { type Category } from "./domain.ts";
 const rules: Partial<Record<Category, RegExp>> = {
   results: /revenue|profit (?:after|before) tax|\bPAT\b|\bEBITDA\b/i,
   dividend:
-    /\b(?:declar\w*|recommend\w*|propos\w*|approv\w*)\b.{0,100}\bdividend\b|\bdividend\b.{0,100}\b(?:declared|recommended|proposed|approved)\b/i,
+    /\b(?:declar\w*|recommend\w*|propos\w*|approv\w*)\b.{0,100}\bdividend\b(?!\s+(?:income|received|paid))|\bdividend\b(?!\s+(?:income|received|paid)).{0,100}\b(?:declared|recommended|proposed|approved)\b/i,
   management_change:
     /(?:chief|CFO|CEO|director|managing).{0,140}(?:resign|appoint|retir|cessation)|(?:resign|appoint|retir|cessation).{0,140}(?:chief|CFO|CEO|director|managing)/i,
   "M&A":
@@ -27,6 +27,13 @@ export function automatedEventSupported(
   headline: string,
 ) {
   if (!supportsEvent(category, text)) return false;
+  if (
+    category === "dividend" &&
+    !/declar(?:ed|ation|e|es)|recommend(?:ed|ation|s)?|propos(?:ed|al|es?)|approv(?:ed|al|es?)/i.test(
+      text.replace(/dividend income|dividends? paid|dividends? received/gi, ""),
+    )
+  )
+    return false;
   if (
     category === "M&A" &&
     /financial|results/i.test(headline) &&
