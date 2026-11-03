@@ -190,6 +190,7 @@ export function officialFinancialLinks(
 async function discoverOfficial(
   host: string,
   allowed: (url: string, host?: string) => boolean,
+  signal: AbortSignal,
 ) {
   const root = `https://www.${host}/`,
     seen = new Set<string>([root]),
@@ -202,7 +203,7 @@ async function discoverOfficial(
     const results = await Promise.allSettled(
       batch.map(async (p) =>
         officialFinancialLinks(
-          await fetchPublicDirectory(p.url),
+          await fetchPublicDirectory(p.url, signal),
           p.url,
           host,
           allowed,
@@ -310,11 +311,12 @@ export function rankCandidates(
 export async function locatePrimaryCandidates(
   ticker: string,
   allowed: (url: string, host?: string) => boolean,
+  signal: AbortSignal = AbortSignal.timeout(20000),
 ) {
   const registered = financialSources.find((s) => s.ticker === ticker);
   if (registered) {
     try {
-      const html = await fetchPublicDirectory(registered.url);
+      const html = await fetchPublicDirectory(registered.url, signal);
       const urls = [
         ...new Set(
           [...html.matchAll(/https[^\s"<>]+\.pdf(?:\?[^"<>\s]*)?/gi)].map((m) =>
@@ -342,7 +344,7 @@ export async function locatePrimaryCandidates(
     }
   }
   const url = `https://www.screener.in/company/${encodeURIComponent(ticker.replace(/\.(NS|BO)$/, ""))}/consolidated/`;
-  const html = await fetchPublicDirectory(url),
+  const html = await fetchPublicDirectory(url, signal),
     parsed = parseCandidates(html, allowed);
   // Follow only the directory's own, narrowly scoped Raw-PDF redirect endpoints.
   // The redirect target must be an independently permitted original PDF; directory
@@ -368,7 +370,7 @@ export async function locatePrimaryCandidates(
     raw.map(async (path, order) => {
       const r = await fetch("https://www.screener.in" + path, {
         redirect: "manual",
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]),
       });
       const target = r.headers.get("location");
       await r.body?.cancel();
@@ -394,7 +396,7 @@ export async function locatePrimaryCandidates(
     r.status === "fulfilled" && r.value ? [r.value] : [],
   );
   const official = parsed.officialHost
-    ? await discoverOfficial(parsed.officialHost, allowed).catch(() => [])
+    ? await discoverOfficial(parsed.officialHost, allowed, signal).catch(() => [])
     : [];
   return {
     ...parsed,
@@ -407,11 +409,13 @@ export async function locatePrimaryCandidates(
     ],
   };
 }
-export async function fetchPublicDirectory(url: string) {
+export async function fetchPublicDirectory(url: string, signal?: AbortSignal) {
   let target = url,
     r: Response | undefined;
   const host = new URL(url).hostname.replace(/^www\./, ""),
-    deadline = AbortSignal.timeout(12000);
+    deadline = signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(12000)])
+      : AbortSignal.timeout(12000);
   for (let hop = 0; hop < 3; hop++) {
     r = await fetch(target, {
       redirect: "manual",

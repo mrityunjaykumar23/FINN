@@ -19,11 +19,33 @@ import {
   officialFinancialLinks,
   rankCandidates,
   documentType,
+  locatePrimaryCandidates,
 } from "../lib/ingestion/discovery.ts";
 import { financialAnalysis } from "../lib/financial-analysis.ts";
 import { financialContexts } from "../lib/financial-context.ts";
 import { latestFinancialPeriod } from "../lib/periods.ts";
 import type { Metric } from "../lib/domain.ts";
+test("a stalled issuer crawl respects the shared discovery deadline and retains already discovered primary links", { timeout: 2000 }, async () => {
+  const originalFetch = globalThis.fetch;
+  const source = "https://www.bseindia.com/stockinfo/AnnPdfOpen.aspx?Pname=verified-results.pdf";
+  globalThis.fetch = async (input, init) => {
+    if (String(input).startsWith("https://www.screener.in/company/HAVELLS/"))
+      return new Response(`<a href="https://www.havells.com/">Company website</a><a href="${source}">Financial results Q2 FY2027</a>`);
+    return new Promise((_, reject) => {
+      const abort = () => reject(new DOMException("Fixture issuer crawl timed out", "AbortError"));
+      if (init?.signal?.aborted) abort();
+      else init?.signal?.addEventListener("abort", abort, { once: true });
+    });
+  };
+  try {
+    const started = Date.now();
+    const result = await locatePrimaryCandidates("HAVELLS.NS", url => url === source, AbortSignal.timeout(30));
+    assert.ok(result.candidates.some(c => c.url === source));
+    assert.ok(Date.now() - started < 1000, "A slow issuer must not extend discovery past the shared phase budget");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 const source = readFileSync(
   new URL("./fixtures/ajanta-indas.html", import.meta.url),
   "utf8",
