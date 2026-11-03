@@ -1,6 +1,6 @@
 # FINN architecture
 
-Local upgrade, 1 November 2026. The existing React/Vinext/Vite Worker architecture and SQLite/D1 runtime remain. There is no second backend, authentication service, vector database or cloud migration.
+The deployed FINN application retains its React/Vinext/Vite Worker architecture and SQLite/D1 runtime. The same code supports the local Worker preview and the public candidate. See [the submission guide](SUBMISSION.md) for the current deployment, verification and operational limits; the component boundaries below remain unchanged.
 
 ```mermaid
 flowchart LR

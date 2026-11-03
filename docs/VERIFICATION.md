@@ -1,4 +1,8 @@
-# Latest data verification — 3 November 2026
+# Verification history
+
+**Current public release:** [FINN ENAM Final](https://finn-enam-final-mrity.hazyanole2049.chatgpt.site/). See [SUBMISSION.md](SUBMISSION.md) and [the submission evidence](test-results/submission/README.md) for the completed deployment and live checks. Statements about local-only work, unpublished changes and older demos below are historical records of those earlier stages.
+
+## Latest data verification — 3 November 2026 (pre-deployment record)
 
 See [LATEST_DATA_VERIFICATION.md](LATEST_DATA_VERIFICATION.md) for the current Latest-mode, automatic financial-snapshot and three-company acceptance results: 117 automated tests passed, with no failures or skips, plus financial validation, migration and browser checks. Local review: http://127.0.0.1:5173/. No deployment or push was performed.
 

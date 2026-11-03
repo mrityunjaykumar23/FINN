@@ -1,0 +1,15 @@
+
+> finn-investment-intelligence@0.1.0 test:research-contention
+> node --test tests/research-contention.integration.test.mjs
+
+(node:31172) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ a competing discovery lease keeps research queued, then resumes the same request after release (341.2106ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 417.1885

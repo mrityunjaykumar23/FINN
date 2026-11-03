@@ -1,0 +1,198 @@
+{
+  "verified_on": "2026-11-03",
+  "demo_url": "https://finn-enam-final-mrity.hazyanole2049.chatgpt.site/",
+  "repository": "https://github.com/mrityunjaykumar23/FINN",
+  "branch": "main",
+  "deployed_application_commit": "18416e11742d8478fc017928900bdd520407b08f",
+  "sites_version": 4,
+  "version_id": "appgprj_6ae9b8987a3c8191b95f93bdf3aeee5c~appgver_f8b3997674d48191adb4fe7ecb523012",
+  "deployment_id": "appgdep_6ae9c2c396e081918bbd2ffdb94949c8",
+  "provenance_note": "Later submission updates change documentation and review evidence only; runtime files match the deployed application commit.",
+  "local_checks": {
+    "typecheck": "passed",
+    "lint": "passed",
+    "build": "passed",
+    "unit_database": {
+      "passed": 109,
+      "failed": 0,
+      "skipped": 0
+    },
+    "api": {
+      "passed": 17,
+      "failed": 0
+    },
+    "research_jobs": {
+      "passed": 1,
+      "failed": 0
+    },
+    "contention_batching": {
+      "passed": 1,
+      "failed": 0
+    }
+  },
+  "live_checks": {
+    "market": {
+      "companies": 18,
+      "priced": 18,
+      "latest_date": "2026-11-03"
+    },
+    "ajanta": {
+      "period": "Q2 FY2027",
+      "metrics": [
+        {
+          "name": "EBITDA",
+          "value": 543,
+          "basis": "Consolidated reported INR"
+        },
+        {
+          "name": "EBITDA",
+          "value": 543,
+          "basis": "Consolidated reported INR"
+        },
+        {
+          "name": "PAT",
+          "value": 388,
+          "basis": "Consolidated reported INR"
+        },
+        {
+          "name": "PAT",
+          "value": 388,
+          "basis": "Consolidated reported INR"
+        },
+        {
+          "name": "PBT",
+          "value": 535,
+          "basis": "Consolidated reported INR"
+        },
+        {
+          "name": "PBT",
+          "value": 535,
+          "basis": "Consolidated reported INR"
+        },
+        {
+          "name": "Revenue",
+          "value": 1794,
+          "basis": "Consolidated reported INR"
+        },
+        {
+          "name": "Revenue",
+          "value": 1794,
+          "basis": "Consolidated reported INR"
+        }
+      ],
+      "documents": 5
+    },
+    "push": {
+      "persisted_events": 2
+    },
+    "promises": {
+      "comparisons": 4
+    },
+    "gemini": {
+      "ai_status": "success",
+      "model": "gemini-3.5-flash-lite",
+      "usage": {
+        "input_tokens": 7659,
+        "output_tokens": 1176
+      },
+      "citations": 8,
+      "metrics": 14,
+      "primary_sources": [
+        {
+          "url": "https://havells.com//media/wysiwyg/PDF/Financial/Quarterly-Results/2026-2027/Quarter-2/Havells_Information_Update_Q2_FY27.pdf#page=3",
+          "page": 3
+        },
+        {
+          "url": "https://havells.com//media/wysiwyg/PDF/Financial/Quarterly-Results/2026-2027/Quarter-2/Havells_Information_Update_Q2_FY27.pdf#page=9",
+          "page": 9
+        },
+        {
+          "url": "https://havells.com//media/wysiwyg/PDF/Financial/Quarterly-Results/2026-2027/Quarter-2/Havells_Information_Update_Q2_FY27.pdf#page=4",
+          "page": 4
+        },
+        {
+          "url": "https://havells.com//media/wysiwyg/PDF/Financial/Quarterly-Results/2026-2027/Quarter-2/Havells_Information_Update_Q2_FY27.pdf#page=5",
+          "page": 5
+        },
+        {
+          "url": "https://havells.com//media/wysiwyg/PDF/Financial/Quarterly-Results/2026-2027/Quarter-2/Havells_Information_Update_Q2_FY27.pdf#page=7",
+          "page": 7
+        },
+        {
+          "url": "https://havells.com//media/wysiwyg/PDF/Financial/Quarterly-Results/2026-2027/Quarter-2/Havells_Information_Update_Q2_FY27.pdf#page=2",
+          "page": 2
+        },
+        {
+          "url": "https://havells.com//media/wysiwyg/PDF/Financial/Quarterly-Results/2026-2027/Quarter-2/Havells_Information_Update_Q2_FY27.pdf#page=6",
+          "page": 6
+        },
+        {
+          "url": "https://havells.com//media/wysiwyg/PDF/Financial/Quarterly-Results/2026-2027/Quarter-2/Havells_Information_Update_Q2_FY27.pdf#page=1",
+          "page": 1
+        }
+      ],
+      "persisted": true
+    },
+    "gemini_elapsed_ms": 40400,
+    "original_pdf_reads": [
+      {
+        "url": "https://havells.com//media/wysiwyg/PDF/Financial/Quarterly-Results/2026-2027/Quarter-2/Havells_Information_Update_Q2_FY27.pdf",
+        "status": 200,
+        "type": "application/pdf"
+      },
+      {
+        "url": "https://www.infosys.com/investors/reports-filings/quarterly-results/2024-2025/q3/documents/transcripts/earningscall.pdf",
+        "status": 200,
+        "type": "application/pdf"
+      }
+    ],
+    "protected_phases_exercised": [
+      "market",
+      "discovery",
+      "ingestion",
+      "documents",
+      "evaluate"
+    ],
+    "responsive_viewports": [
+      {
+        "gemini_success": true,
+        "overflow": false,
+        "scroll_width": 305,
+        "width": 320
+      },
+      {
+        "gemini_success": true,
+        "overflow": false,
+        "scroll_width": 360,
+        "width": 375
+      },
+      {
+        "gemini_success": true,
+        "overflow": false,
+        "scroll_width": 1425,
+        "width": 1440
+      }
+    ],
+    "mobile_navigation": [
+      "Briefing",
+      "Portfolio",
+      "Research",
+      "Promises",
+      "Alerts"
+    ],
+    "mobile_add_reload_remove": true,
+    "standalone_does_not_reuse_consolidated": true,
+    "gemini_rendered_success": true
+  },
+  "recorded_database_counts": {
+    "companies": 23,
+    "documents": 33,
+    "chunks": 2376,
+    "announcements": 19,
+    "metrics": 306,
+    "guidance": 4
+  },
+  "unattended_schedule_enabled": false,
+  "original_site_and_database_preserved": true,
+  "prior_personal_portfolios_transferred": false
+}

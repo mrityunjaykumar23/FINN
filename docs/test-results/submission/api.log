@@ -1,0 +1,29 @@
+
+> finn-investment-intelligence@0.1.0 test:api
+> node --test tests/api.test.mjs tests/upgrade-api.test.mjs
+
+✔ health, persisted portfolio, and authentic daily observations (232.4525ms)
+✔ search inside and outside the portfolio is not coupled to watchlist membership (95.7493ms)
+✔ add/remove is persistent and idempotent (124.6563ms)
+✔ windowed digest separates material filings and lower-priority source context (419.8968ms)
+✔ stored alert settings change the evaluation of real EOD observations (204.225ms)
+✔ research cites actual primary documents and excludes cross-company passages (1202.4888ms)
+✔ a missing passage produces neither a company conclusion nor a fake citation (35.1934ms)
+✔ guidance links both matching-period sources and computes the miss (133.5892ms)
+✔ validation, missing evidence, and protected ingestion return structured errors (204.8916ms)
+✔ simultaneous first requests initialize once; spoofed identity headers are ignored (276.5094ms)
+✔ removing the entire starter portfolio persists; another visitor keeps sources and selections (1866.8387ms)
+✔ read and dismissed alerts survive repeated evaluation and remain owner isolated (408.2184ms)
+✔ unavailable requested fiscal period does not reuse FY2025 guidance or invented sources (34.0113ms)
+✔ source status reports actual persisted coverage and no configuration secrets (19.8423ms)
+✔ cross-origin writes and oversized streamed JSON are controlled errors (20.4718ms)
+✔ saving alert rules does not regenerate historical or live notifications; replay stays explicit (184.0899ms)
+✔ scheduled writer rejects requests without its service or admin credential (8.7995ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 17
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2913.3818

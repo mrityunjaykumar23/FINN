@@ -1,17 +1,17 @@
-# Draft covering note — prepare after local review
+# FINN — ENAM Holdings submission note
 
 Dear ENAM Holdings assessment team,
 
-FINN is an investment intelligence copilot built around a prioritised portfolio briefing and primary-source company research. It preserves a mobile-first interface, an 18-company starter watchlist, real stored EOD observations, configurable alerts and inspectable source pages.
+FINN is an AI investment intelligence copilot combining a prioritised portfolio briefing with evidence-grounded company research. Its mobile-first workspace includes an 18-company starter watchlist, completed EOD observations, persistent alerts, source-linked financial snapshots and management guidance comparisons.
 
-The local upgrade adds durable owner-isolated SQLite storage, normalized filings and metrics, native Gemini classification/extraction/research, bounded source discovery, notification read/dismiss state, source-linked quarterly calculations and database-backed management guidance with revisions. Real local tests include a previously unseen NSE ticker, authentic imported NSE filings, dynamic HCLTech guidance/actual matching and restart durability.
+- **Public demo:** [Open FINN](https://finn-enam-final-mrity.hazyanole2049.chatgpt.site/)
+- **Source repository:** [mrityunjaykumar23/FINN](https://github.com/mrityunjaykumar23/FINN), branch `main`
+- **Reviewer walkthrough and verification:** [Submission guide](SUBMISSION.md)
 
-Existing published repository: https://github.com/mrityunjaykumar23/FINN
-Existing published demo: https://finn-investment-intelligence-mrity.hazyanole2049.chatgpt.site
+The public deployment was tested on 3 November 2026 with localhost stopped. Acceptance included authentic ITC announcement ingestion, real Gemini research for Havells outside the test portfolio, checked primary-source page citations, Ajanta financial extraction, Yahoo refresh, portfolio persistence and mobile navigation. Type checks, production builds and the documented automated suites passed.
 
-**Release status:** the upgrade is committed locally on `upgrade/sqlite-gemini-push-pull` and has not been pushed or deployed. Update this note and the reviewer links only after the user reviews the tested local version and requests publication.
+FINN retains original reporting periods, units, accounting bases and source references. It reports incomplete coverage, unsupported metrics and AI failures explicitly. Disclosure coverage is bounded, and unattended recurring scheduling is not yet enabled; the protected update phases have been exercised successfully. These limits and the release provenance are documented in the submission guide.
 
-The application reports source gaps, absent financial metrics, incompatible definitions and AI failures explicitly. It does not claim a complete exchange feed or phone notification service. The verification record and genuine development history accompany the source. No API key is committed.
+The repository includes the genuine implementation history and review evidence. Credentials and local databases are excluded from source control.
 
-Regards,
-[Add your preferred name/contact before sending]
+Thank you for reviewing FINN.
