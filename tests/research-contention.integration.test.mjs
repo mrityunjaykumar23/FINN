@@ -34,7 +34,8 @@ test("a competing discovery lease keeps research queued, then resumes the same r
   const version = readFileSync("lib/ingestion/discovery.ts", "utf8").match(/DISCOVERY_VERSION = "([^"]+)"/)[1];
   try {
     // No network dependency: existing authentic seed documents supply the evidence.
-    db.prepare("INSERT OR REPLACE INTO meta(key,value) VALUES (?,?)").run(catalogueKey, JSON.stringify({at:new Date().toISOString(), version, result:{candidates:[],limitations:[]}}));
+    const candidates = Array.from({length:60},(_,order)=>({url:`https://www.infosys.com/fixture-discovery-candidate-${order}.pdf`,title:`Isolated catalogue fixture ${order}`,type:"announcement",published_at:null,period:null,order}));
+    db.prepare("INSERT OR REPLACE INTO meta(key,value) VALUES (?,?)").run(catalogueKey, JSON.stringify({at:new Date().toISOString(), version, result:{candidates,limitations:[]}}));
     db.prepare("INSERT OR REPLACE INTO job_locks(key,expires_at) VALUES (?,?)").run(key, new Date(Date.now()+180000).toISOString());
     const created = await api("research/jobs", {ticker:"INFY.NS", type:"results", question:"Explain the latest reported revenue growth using the original company financial results."});
     await api("research/jobs/"+created.id+"/advance", {});
@@ -73,10 +74,12 @@ test("a competing discovery lease keeps research queued, then resumes the same r
     assert.equal(state.phase,"analysis");
     assert.equal(state.error,null);
     assert.equal(state.result,null,"No synthesis success is fabricated by contention recovery.");
+    assert.equal(db.prepare("SELECT count(*) n FROM discovery_candidates WHERE ticker='INFY.NS' AND url LIKE 'https://www.infosys.com/fixture-discovery-candidate-%'").get().n,60,"Candidate persistence crosses the batch boundary without truncation");
   } finally {
     db.prepare("DELETE FROM job_locks WHERE key=?").run(key);
     if(prior)db.prepare("UPDATE meta SET value=? WHERE key=?").run(prior.value,catalogueKey);
     else db.prepare("DELETE FROM meta WHERE key=?").run(catalogueKey);
+    db.prepare("DELETE FROM discovery_candidates WHERE ticker='INFY.NS' AND url LIKE 'https://www.infosys.com/fixture-discovery-candidate-%'").run();
     db.close();
   }
 });

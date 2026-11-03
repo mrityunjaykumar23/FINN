@@ -1590,19 +1590,29 @@ async function discoverDocumentsWork(
       }),
     );
   const { candidates } = discovered;
-  for (const c of candidates) {
-    await run(
-      "INSERT INTO discovery_candidates(id,ticker,url,title,type,published_at,period,status,checked_at) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(ticker,url) DO UPDATE SET title=excluded.title,type=excluded.type,checked_at=excluded.checked_at",
-      await sha(`${ticker}:${c.url}`),
-      ticker,
-      c.url,
-      c.title,
-      c.type,
-      c.published_at,
-      c.period,
-      "discovered",
-      new Date().toISOString(),
+  // Large issuer catalogues must not spend an entire hosted background phase
+  // making one D1 round trip per candidate. Keep every candidate, in bounded batches.
+  for (let offset = 0; offset < candidates.length; offset += 50) {
+    const statements = await Promise.all(
+      candidates.slice(offset, offset + 50).map(async (c) =>
+        db()
+          .prepare(
+            "INSERT INTO discovery_candidates(id,ticker,url,title,type,published_at,period,status,checked_at) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(ticker,url) DO UPDATE SET title=excluded.title,type=excluded.type,checked_at=excluded.checked_at",
+          )
+          .bind(
+            await sha(`${ticker}:${c.url}`),
+            ticker,
+            c.url,
+            c.title,
+            c.type,
+            c.published_at,
+            c.period,
+            "discovered",
+            new Date().toISOString(),
+          ),
+      ),
     );
+    await db().batch(statements);
   }
   const indexed = await all<{
     url: string;
