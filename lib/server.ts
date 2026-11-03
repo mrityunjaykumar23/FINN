@@ -1548,6 +1548,7 @@ export async function discoverDocuments(
         e instanceof ApiError ? e.message : "Document discovery failed.",
       ],
       status: "failed",
+      error_code: e instanceof ApiError ? e.code : "document_discovery_failed",
     };
   }
 }

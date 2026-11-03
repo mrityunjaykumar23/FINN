@@ -167,6 +167,18 @@ export async function runResearchPhase(job: Job) {
           question: job.question,
           queueOnly: true,
         });
+        if (
+          "error_code" in latestDiscovery &&
+          latestDiscovery.error_code === "sync_in_progress"
+        ) {
+          // Another visitor owns the short-lived source lease. Keep this request
+          // resumable instead of treating normal shared work as a source failure.
+          await next(
+            "discovery",
+            "Another request is checking this company's latest sources. Waiting to reuse its indexed evidence.",
+          );
+          return;
+        }
         const id =
           "job_ids" in latestDiscovery
             ? (latestDiscovery.job_ids as string[] | undefined)?.[0]
@@ -223,6 +235,18 @@ export async function runResearchPhase(job: Job) {
             ...(filters.type ? [filters.type] : []),
           )
         )?.id;
+      }
+      if (
+        !id &&
+        "error_code" in discovered &&
+        (discovered.error_code === "sync_in_progress" ||
+          discovered.error_code === "sync_cooldown")
+      ) {
+        await next(
+          "discovery",
+          "Source synchronization is active or cooling down. This research request remains queued until the shared sources are ready.",
+        );
+        return;
       }
       if (!id)
         throw new Error(
